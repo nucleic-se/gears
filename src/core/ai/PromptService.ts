@@ -22,8 +22,9 @@ export class AIPromptService implements IAIPromptService {
             try {
                 llm = this.container.make('ILLMProvider');
             } catch (error) {
+                const provider = process.env.LLM_PROVIDER || 'ollama';
                 throw new Error(
-                    'Ollama LLM provider not configured. Set OLLAMA_HOST and ensure core services are booted.',
+                    `LLM provider "${provider}" not configured. Ensure required environment variables are set and core services are booted.`,
                     { cause: error },
                 );
             }

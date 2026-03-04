@@ -16,6 +16,7 @@ export { AIPromptService } from './core/ai/PromptService.js';
 export { AIActionRegistry } from './core/ai/AIActionRegistry.js';
 export { AIPipeline } from './core/ai/Pipeline.js';
 export { OllamaLLMProvider } from './core/infra/OllamaLLMProvider.js';
+export { GeminiLLMProvider } from './core/infra/GeminiLLMProvider.js';
 export { getDataDir, ensureDataDir, getDbPath } from './core/utils/paths.js';
 
 import { Container } from './core/container/Container.js';
