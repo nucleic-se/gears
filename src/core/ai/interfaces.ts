@@ -1,5 +1,5 @@
 /**
- * AI builder interfaces — re-exported from @nucleic/agentic,
+ * AI builder interfaces — re-exported from @nucleic-se/agentic,
  * plus tool/action registry contracts.
  */
 
@@ -8,7 +8,7 @@ export type {
     IAIPromptService,
     IAIPipeline,
     PipelineOptions,
-} from '@nucleic/agentic/contracts';
+} from '@nucleic-se/agentic/contracts';
 
 export interface AIAction {
     name: string;

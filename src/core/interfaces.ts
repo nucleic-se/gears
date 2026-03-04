@@ -170,8 +170,8 @@ export interface IStore {
     scan<T = any>(prefix?: string): Promise<Record<string, T>>;
 }
 
-// --- LLM Abstraction (re-exported from @nucleic/agentic) ---
+// --- LLM Abstraction (re-exported from @nucleic-se/agentic) ---
 
-export type { ILLMProvider, LLMRequest } from '@nucleic/agentic/contracts';
+export type { ILLMProvider, LLMRequest } from '@nucleic-se/agentic/contracts';
 
 export * from './metrics/interfaces.js';

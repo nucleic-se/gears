@@ -1,4 +1,4 @@
 /**
- * Re-export @nucleic/agentic for consumers that import from 'gears/agentic'.
+ * Re-export @nucleic-se/agentic for consumers that import from 'gears/agentic'.
  */
-export * from '@nucleic/agentic';
+export * from '@nucleic-se/agentic';

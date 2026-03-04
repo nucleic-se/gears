@@ -1,5 +1,5 @@
 /**
- * AI Pipeline — re-exported from @nucleic/agentic.
+ * AI Pipeline — re-exported from @nucleic-se/agentic.
  */
 
-export { AIPipeline } from '@nucleic/agentic/runtime';
+export { AIPipeline } from '@nucleic-se/agentic/runtime';
