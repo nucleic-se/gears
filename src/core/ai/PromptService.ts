@@ -1,0 +1,42 @@
+/**
+ * Container-aware AI prompt service.
+ *
+ * Thin wrapper that resolves ILLMProvider from the Container,
+ * then delegates to the decoupled library AIPromptService.
+ */
+
+import { Container } from '../container/Container.js';
+import { ILLMProvider } from '../interfaces.js';
+import { IAIPromptService, IAIPromptBuilder, IAIPipeline } from './interfaces.js';
+import { AIPromptService as LibAIPromptService } from '@nucleic/agentic/runtime';
+
+export class AIPromptService implements IAIPromptService {
+    private delegate: LibAIPromptService | null = null;
+
+    constructor(private container: Container) {}
+
+    /** Lazily resolve ILLMProvider so construction doesn't throw */
+    private getDelegate(): LibAIPromptService {
+        if (!this.delegate) {
+            let llm: ILLMProvider;
+            try {
+                llm = this.container.make('ILLMProvider');
+            } catch (error) {
+                throw new Error(
+                    'Ollama LLM provider not configured. Set OLLAMA_HOST and ensure core services are booted.',
+                    { cause: error },
+                );
+            }
+            this.delegate = new LibAIPromptService(llm);
+        }
+        return this.delegate;
+    }
+
+    use(model?: string): IAIPromptBuilder {
+        return this.getDelegate().use(model);
+    }
+
+    pipeline<T>(start: T): IAIPipeline<T> {
+        return this.getDelegate().pipeline(start);
+    }
+}

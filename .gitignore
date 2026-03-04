@@ -1,0 +1,37 @@
+node_modules
+.env
+.DS_Store
+attic
+!docs/attic/
+!docs/attic/**
+coverage
+dist
+logs
+
+# Runtime Data
+queue.sqlite
+queue.sqlite-journal
+queue.sqlite-wal
+queue.sqlite-shm
+jobs.sqlite
+jobs.sqlite-journal
+jobs.sqlite-wal
+jobs.sqlite-shm
+locks.sqlite
+locks.sqlite-journal
+locks.sqlite-wal
+locks.sqlite-shm
+store.sqlite
+store.sqlite-journal
+store.sqlite-wal
+store.sqlite-shm
+
+# Config (optional - strictly local bundles)
+bundles.json
+test-*.sqlite*
+.gears/
+*.log
+# Agentic tree artifacts
+trees/
+.tree/
+root/
