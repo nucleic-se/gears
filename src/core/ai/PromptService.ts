@@ -8,7 +8,7 @@
 import { Container } from '../container/Container.js';
 import { ILLMProvider } from '../interfaces.js';
 import { IAIPromptService, IAIPromptBuilder, IAIPipeline } from './interfaces.js';
-import { AIPromptService as LibAIPromptService } from '@nucleic/agentic/runtime';
+import { AIPromptService as LibAIPromptService } from '@nucleic-se/agentic/runtime';
 
 export class AIPromptService implements IAIPromptService {
     private delegate: LibAIPromptService | null = null;

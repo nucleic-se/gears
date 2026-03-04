@@ -1,8 +1,19 @@
 {
-  "name": "gears",
+  "name": "@nucleic-se/gears",
   "version": "0.1.0",
   "description": "A specialized, modular agentic worker framework for Node.js.",
   "license": "ISC",
+  "repository": {
+    "type": "git",
+    "url": "git+ssh://git@github.com/nucleic-se/gears.git"
+  },
+  "bugs": {
+    "url": "https://github.com/nucleic-se/gears/issues"
+  },
+  "homepage": "https://github.com/nucleic-se/gears#readme",
+  "publishConfig": {
+    "access": "public"
+  },
   "author": "",
   "type": "module",
   "main": "dist/src/index.js",
@@ -32,6 +43,8 @@
     "watch": "tsc -w",
     "start": "node dist/src/cli/index.js work",
     "dev": "concurrently \"npm run watch\" \"npx nodemon --watch dist --delay 1 dist/src/cli/index.js work\"",
+    "prepare": "npm run build",
+    "prepublishOnly": "npm run build",
     "test": "vitest run",
     "clean": "rm -f test-*.sqlite* && rm -f .gears/test-*.sqlite*"
   },
@@ -53,7 +66,7 @@
     "zod": "^4.3.6"
   },
   "dependencies": {
-    "@nucleic/agentic": "git+ssh://david@bullshit.se/~/git/nucleic/agentic",
+    "@nucleic-se/agentic": "^0.1.0",
     "better-sqlite3": "^12.6.2",
     "blessed": "^0.1.81",
     "blessed-contrib": "^4.11.0",
