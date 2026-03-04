@@ -17,6 +17,7 @@ export { AIActionRegistry } from './core/ai/AIActionRegistry.js';
 export { AIPipeline } from './core/ai/Pipeline.js';
 export { OllamaLLMProvider } from './core/infra/OllamaLLMProvider.js';
 export { GeminiLLMProvider } from './core/infra/GeminiLLMProvider.js';
+export { AnthropicLLMProvider } from './core/infra/AnthropicLLMProvider.js';
 export { getDataDir, ensureDataDir, getDbPath } from './core/utils/paths.js';
 
 import { Container } from './core/container/Container.js';
