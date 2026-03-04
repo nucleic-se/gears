@@ -9,6 +9,7 @@ import { SQLiteDurableEventBus } from '../infra/SQLiteDurableEventBus.js';
 import { EventBus } from '../events/EventBus.js';
 import { CheerioParser } from '../infra/CheerioParser.js';
 import { OllamaLLMProvider } from '../infra/OllamaLLMProvider.js';
+import { GeminiLLMProvider } from '../infra/GeminiLLMProvider.js';
 import { SQLiteMetrics } from '../metrics/SQLiteMetrics.js';
 import { SharedDatabase } from '../utils/SharedDatabase.js';
 import { AIPromptService } from '../ai/PromptService.js';
@@ -60,13 +61,18 @@ export class CoreServiceProvider extends ServiceProvider {
         // HTML Parser
         this.app.singleton('IHtmlParser', () => new CheerioParser());
 
-        // LLM Provider — inject shared fetcher for retry + backoff on 5xx
-        this.app.singleton('ILLMProvider', (app) => new OllamaLLMProvider(
-            undefined, undefined,
-            app.makeOrNull('IMetrics') ?? undefined,
-            undefined, undefined, undefined,
-            app.make('IFetcher'),
-        ));
+        // LLM Provider — switch via LLM_PROVIDER=gemini|ollama (default: ollama)
+        this.app.singleton('ILLMProvider', (app) => {
+            const metrics = app.makeOrNull('IMetrics') ?? undefined;
+            if (process.env.LLM_PROVIDER === 'gemini') {
+                return new GeminiLLMProvider(undefined, undefined, metrics);
+            }
+            return new OllamaLLMProvider(
+                undefined, undefined, metrics,
+                undefined, undefined, undefined,
+                app.make('IFetcher'),
+            );
+        });
 
         // Core AI abstractions built on top of ILLMProvider
         this.app.singleton('IAIPromptService', (app) => new AIPromptService(app));

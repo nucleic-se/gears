@@ -66,6 +66,7 @@
     "zod": "^4.3.6"
   },
   "dependencies": {
+    "@google/genai": "^1.43.0",
     "@nucleic-se/agentic": "^0.1.0",
     "better-sqlite3": "^12.6.2",
     "blessed": "^0.1.81",
