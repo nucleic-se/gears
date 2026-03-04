@@ -10,6 +10,7 @@ import { EventBus } from '../events/EventBus.js';
 import { CheerioParser } from '../infra/CheerioParser.js';
 import { OllamaLLMProvider } from '../infra/OllamaLLMProvider.js';
 import { GeminiLLMProvider } from '../infra/GeminiLLMProvider.js';
+import { AnthropicLLMProvider } from '../infra/AnthropicLLMProvider.js';
 import { SQLiteMetrics } from '../metrics/SQLiteMetrics.js';
 import { SharedDatabase } from '../utils/SharedDatabase.js';
 import { AIPromptService } from '../ai/PromptService.js';
@@ -61,11 +62,15 @@ export class CoreServiceProvider extends ServiceProvider {
         // HTML Parser
         this.app.singleton('IHtmlParser', () => new CheerioParser());
 
-        // LLM Provider — switch via LLM_PROVIDER=gemini|ollama (default: ollama)
+        // LLM Provider — switch via LLM_PROVIDER=anthropic|gemini|ollama (default: ollama)
         this.app.singleton('ILLMProvider', (app) => {
             const metrics = app.makeOrNull('IMetrics') ?? undefined;
-            if (process.env.LLM_PROVIDER === 'gemini') {
+            const provider = (process.env.LLM_PROVIDER || 'ollama').toLowerCase();
+            if (provider === 'gemini') {
                 return new GeminiLLMProvider(undefined, undefined, metrics);
+            }
+            if (provider === 'anthropic') {
+                return new AnthropicLLMProvider(undefined, undefined, metrics);
             }
             return new OllamaLLMProvider(
                 undefined, undefined, metrics,
