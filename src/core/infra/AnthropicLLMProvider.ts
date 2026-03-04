@@ -2,62 +2,9 @@ import Anthropic from '@anthropic-ai/sdk';
 import { IMetrics } from '../metrics/interfaces.js';
 import { ILLMProvider, LLMRequest } from '../interfaces.js';
 
-function extractJsonCandidate(text: string): string | null {
-    const trimmed = text.trim();
-    if (!trimmed) return null;
-
-    const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
-    if (fenced && fenced[1]) {
-        return fenced[1].trim();
-    }
-
-    const startIndex = trimmed.search(/[\[{]/);
-    if (startIndex === -1) return null;
-
-    const startChar = trimmed[startIndex];
-    const endChar = startChar === '{' ? '}' : ']';
-    let depth = 0;
-    let inString = false;
-    let escaped = false;
-
-    for (let i = startIndex; i < trimmed.length; i++) {
-        const ch = trimmed[i];
-
-        if (inString) {
-            if (escaped) {
-                escaped = false;
-                continue;
-            }
-            if (ch === '\\') {
-                escaped = true;
-                continue;
-            }
-            if (ch === '"') {
-                inString = false;
-            }
-            continue;
-        }
-
-        if (ch === '"') {
-            inString = true;
-            continue;
-        }
-
-        if (ch === startChar) depth += 1;
-        if (ch === endChar) {
-            depth -= 1;
-            if (depth === 0) {
-                return trimmed.slice(startIndex, i + 1);
-            }
-        }
-    }
-
-    return null;
-}
-
 /**
  * AnthropicLLMProvider - Integration with Anthropic Claude API via @anthropic-ai/sdk
- * Uses strict prompt instructions and JSON extraction/parsing for structured output.
+ * Uses tool_use with forced tool_choice for native structured JSON output.
  */
 export class AnthropicLLMProvider implements ILLMProvider {
     private client: Anthropic;
@@ -67,7 +14,7 @@ export class AnthropicLLMProvider implements ILLMProvider {
 
     constructor(
         apiKey: string = process.env.ANTHROPIC_API_KEY || '',
-        defaultModel: string = process.env.ANTHROPIC_MODEL || 'claude-3-5-sonnet-latest',
+        defaultModel: string = process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-6',
         metrics?: IMetrics,
         maxTokens: number = Number(process.env.ANTHROPIC_MAX_TOKENS || 4096),
     ) {
@@ -81,56 +28,48 @@ export class AnthropicLLMProvider implements ILLMProvider {
     async process<T = any>(request: LLMRequest<T>): Promise<T> {
         const model = request.model || this.defaultModel;
         const start = Date.now();
-        const schemaStr = JSON.stringify(request.schema ?? {}, null, 2);
 
-        const prompt = `${request.instructions}
-
-INPUT:
-${request.text}
-
-IMPORTANT:
-- Respond ONLY with valid JSON.
-- Do not include markdown fences.
-- JSON must match this schema:
-${schemaStr}`;
+        const tools: Anthropic.Tool[] = [
+            {
+                name: 'output',
+                description: 'Return the structured result.',
+                input_schema: (request.schema as Anthropic.Tool['input_schema']) ?? { type: 'object' },
+            },
+        ];
 
         try {
             const response = await this.client.messages.create({
                 model,
                 max_tokens: this.maxTokens,
-                temperature: request.temperature ?? 0.7,
-                messages: [{ role: 'user', content: prompt }],
+                temperature: request.temperature ?? 0,
+                system: request.instructions,
+                tools,
+                tool_choice: { type: 'tool', name: 'output' },
+                messages: [{ role: 'user', content: request.text }],
             });
 
             const duration = Date.now() - start;
-            const text = response.content
-                .filter((item) => item.type === 'text')
-                .map((item) => item.text)
-                .join('\n')
-                .trim();
 
             if (this.metrics) {
                 this.metrics.increment('llm.request', 1, { model });
                 this.metrics.gauge('llm.latency', duration, { model });
+                if (response.usage?.input_tokens) {
+                    this.metrics.increment('llm.tokens.input', response.usage.input_tokens, { model });
+                }
                 if (response.usage?.output_tokens) {
                     this.metrics.increment('llm.tokens.output', response.usage.output_tokens, { model });
                 }
             }
 
-            if (!text) {
-                throw new Error('AnthropicLLMProvider: empty response from model');
+            const toolUse = response.content.find((item) => item.type === 'tool_use');
+            if (!toolUse || toolUse.type !== 'tool_use') {
+                throw new Error('AnthropicLLMProvider: no tool_use block in response');
             }
 
-            try {
-                return JSON.parse(text) as T;
-            } catch {
-                const extracted = extractJsonCandidate(text);
-                if (extracted) return JSON.parse(extracted) as T;
-                throw new Error(`AnthropicLLMProvider: failed to parse response as JSON: ${text.substring(0, 20_000)}`);
-            }
+            return toolUse.input as T;
         } catch (error) {
             if (error instanceof Error) {
-                throw new Error(`AnthropicLLMProvider error: ${error.message}`);
+                throw new Error(`AnthropicLLMProvider error: ${error.message}`, { cause: error });
             }
             throw error;
         }

@@ -39,7 +39,7 @@ ${request.text}`;
                 model,
                 contents: prompt,
                 config: {
-                    temperature: request.temperature ?? 0.7,
+                    temperature: request.temperature ?? 0,
                     responseMimeType: 'application/json',
                     ...(request.schema ? { responseSchema: request.schema as any } : {}),
                 },
@@ -52,6 +52,9 @@ ${request.text}`;
             if (this.metrics) {
                 this.metrics.increment('llm.request', 1, { model });
                 this.metrics.gauge('llm.latency', duration, { model });
+                if (usageMeta?.promptTokenCount) {
+                    this.metrics.increment('llm.tokens.input', usageMeta.promptTokenCount, { model });
+                }
                 if (usageMeta?.candidatesTokenCount) {
                     this.metrics.increment('llm.tokens.output', usageMeta.candidatesTokenCount, { model });
                 }
@@ -68,7 +71,7 @@ ${request.text}`;
             }
         } catch (error) {
             if (error instanceof Error) {
-                throw new Error(`GeminiLLMProvider error: ${error.message}`);
+                throw new Error(`GeminiLLMProvider error: ${error.message}`, { cause: error });
             }
             throw error;
         }
