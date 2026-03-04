@@ -1,0 +1,14 @@
+
+david@Davids-MacBook-Pro gears % npx gears top
+file:///Users/david/Coding/gears/dist/core/metrics/SQLiteMetrics.js:5
+        const DatabaseConstructor = process.versions.bun ? require('bun:sqlite').Database : require('better-sqlite3');
+                                                                                ^
+
+ReferenceError: require is not defined
+    at new SQLiteMetrics (file:///Users/david/Coding/gears/dist/core/metrics/SQLiteMetrics.js:5:81)
+    at file:///Users/david/Coding/gears/dist/core/providers/CoreServiceProvider.js:36:46
+    at Container.make (file:///Users/david/Coding/gears/dist/core/container/Container.js:44:34)
+    at Container.makeOrNull (file:///Users/david/Coding/gears/dist/core/container/Container.js:66:21)
+    at topCommand (file:///Users/david/Coding/gears/dist/cli/commands/top.js:4:25)
+    at Command.<anonymous> (file:///Users/david/Coding/gears/dist/cli/index.js:234:11)
+
