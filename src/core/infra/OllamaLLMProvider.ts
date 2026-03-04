@@ -1,58 +1,6 @@
 import { IMetrics } from '../metrics/interfaces.js';
 import { ILLMProvider, LLMRequest, IFetcher } from '../interfaces.js';
-
-function extractJsonCandidate(text: string): string | null {
-    const trimmed = text.trim();
-    if (!trimmed) return null;
-
-    const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
-    if (fenced && fenced[1]) {
-        return fenced[1].trim();
-    }
-
-    const startIndex = trimmed.search(/[\[{]/);
-    if (startIndex === -1) return null;
-
-    const startChar = trimmed[startIndex];
-    const endChar = startChar === '{' ? '}' : ']';
-    let depth = 0;
-    let inString = false;
-    let escaped = false;
-
-    for (let i = startIndex; i < trimmed.length; i++) {
-        const ch = trimmed[i];
-
-        if (inString) {
-            if (escaped) {
-                escaped = false;
-                continue;
-            }
-            if (ch === '\\') {
-                escaped = true;
-                continue;
-            }
-            if (ch === '"') {
-                inString = false;
-            }
-            continue;
-        }
-
-        if (ch === '"') {
-            inString = true;
-            continue;
-        }
-
-        if (ch === startChar) depth += 1;
-        if (ch === endChar) {
-            depth -= 1;
-            if (depth === 0) {
-                return trimmed.slice(startIndex, i + 1);
-            }
-        }
-    }
-
-    return null;
-}
+import { extractJsonCandidate } from './llmUtils.js';
 
 /**
  * OllamaLLMProvider - Direct integration with Ollama API
@@ -94,7 +42,7 @@ export class OllamaLLMProvider implements ILLMProvider {
         // Note: /no_think prefix does NOT work for qwen3-next models on Ollama cloud —
         // the model still enters thinking mode. We instead use a higher num_predict
         // to give room for both thinking tokens and response tokens.
-        const schemaStr = JSON.stringify(request.schema, null, 2);
+        const schemaStr = JSON.stringify(request.schema ?? {}, null, 2);
         const prompt = `${request.instructions}
 
 INPUT:
@@ -120,7 +68,7 @@ JSON Response:`;
             stream: false,
             format: 'json',
             options: {
-                temperature: request.temperature ?? 0.7,
+                temperature: request.temperature ?? 0,
                 num_predict: 16384,
             }
         };
@@ -147,6 +95,7 @@ JSON Response:`;
             const data = JSON.parse(raw) as {
                 response: string;
                 thinking?: string;
+                prompt_eval_count?: number;
                 eval_count?: number;
                 eval_duration?: number;
             };
@@ -155,6 +104,9 @@ JSON Response:`;
             if (this.metrics) {
                 this.metrics.increment('llm.request', 1, { model });
                 this.metrics.gauge('llm.latency', duration, { model });
+                if (data.prompt_eval_count) {
+                    this.metrics.increment('llm.tokens.input', data.prompt_eval_count, { model });
+                }
                 if (data.eval_count) {
                     this.metrics.increment('llm.tokens.output', data.eval_count, { model });
                 }
@@ -197,8 +149,7 @@ JSON Response:`;
                 if (error.name === 'AbortError' || error.message.includes('timed out')) {
                     throw new Error('OllamaLLMProvider error: Request timed out after 5 minutes');
                 }
-                const cause = (error as any).cause ? ` Cause: ${(error as any).cause}` : '';
-                throw new Error(`OllamaLLMProvider error: ${error.message}${cause}`);
+                throw new Error(`OllamaLLMProvider error: ${error.message}`, { cause: error });
             }
             throw error;
         }
@@ -228,7 +179,9 @@ JSON Response:`;
 
             const raw = typeof resp.body === 'string' ? resp.body : resp.body.toString('utf-8');
             const data = JSON.parse(raw) as { embeddings: number[][] };
-            return data.embeddings[0];
+            const values = data.embeddings?.[0];
+            if (!values) throw new Error('OllamaLLMProvider: no embedding values in response');
+            return values;
 
         } catch (error) {
             if (error instanceof Error && (error.name === 'AbortError' || error.message.includes('timed out'))) {
