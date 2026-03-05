@@ -8,9 +8,7 @@ import { SQLiteStore } from '../infra/SQLiteStore.js';
 import { SQLiteDurableEventBus } from '../infra/SQLiteDurableEventBus.js';
 import { EventBus } from '../events/EventBus.js';
 import { CheerioParser } from '../infra/CheerioParser.js';
-import { OllamaLLMProvider } from '../infra/OllamaLLMProvider.js';
-import { GeminiLLMProvider } from '../infra/GeminiLLMProvider.js';
-import { AnthropicLLMProvider } from '../infra/AnthropicLLMProvider.js';
+import { createLLMProvider } from '../infra/LLMProviderFactory.js';
 import { SQLiteMetrics } from '../metrics/SQLiteMetrics.js';
 import { SharedDatabase } from '../utils/SharedDatabase.js';
 import { AIPromptService } from '../ai/PromptService.js';
@@ -62,22 +60,7 @@ export class CoreServiceProvider extends ServiceProvider {
         // HTML Parser
         this.app.singleton('IHtmlParser', () => new CheerioParser());
 
-        // LLM Provider — switch via LLM_PROVIDER=anthropic|gemini|ollama (default: ollama)
-        this.app.singleton('ILLMProvider', (app) => {
-            const metrics = app.makeOrNull('IMetrics') ?? undefined;
-            const provider = (process.env.LLM_PROVIDER || 'ollama').toLowerCase();
-            if (provider === 'gemini') {
-                return new GeminiLLMProvider(undefined, undefined, metrics);
-            }
-            if (provider === 'anthropic') {
-                return new AnthropicLLMProvider(undefined, undefined, metrics);
-            }
-            return new OllamaLLMProvider(
-                undefined, undefined, metrics,
-                undefined, undefined, undefined,
-                app.make('IFetcher'),
-            );
-        });
+        // ILLMProvider is resolved asynchronously in boot() to support lazy provider loading.
 
         // Core AI abstractions built on top of ILLMProvider
         this.app.singleton('IAIPromptService', (app) => new AIPromptService(app));
@@ -88,5 +71,15 @@ export class CoreServiceProvider extends ServiceProvider {
             const shared = app.make('SharedDatabase');
             return new SQLiteMetrics(shared.db);
         });
+    }
+
+    async boot(): Promise<void> {
+        // LLM Provider — switch via LLM_PROVIDER=anthropic|gemini|ollama (default: ollama)
+        // Resolved here (async) so provider modules are only loaded when actually needed.
+        const provider = await createLLMProvider({
+            metrics: this.app.makeOrNull('IMetrics') ?? undefined,
+            fetcher: this.app.make('IFetcher'),
+        });
+        this.app.singleton('ILLMProvider', () => provider);
     }
 }
