@@ -251,11 +251,26 @@ program
 
         // 1. System Check
         const nodeVersion = process.version;
-        const major = parseInt(nodeVersion.slice(1).split('.')[0], 10);
-        if (major >= 18) {
+        const parseSemver = (value: string): [number, number, number] => {
+            const [major, minor, patch] = value.replace(/^v/, '').split('.');
+            return [
+                Number.parseInt(major ?? '0', 10) || 0,
+                Number.parseInt(minor ?? '0', 10) || 0,
+                Number.parseInt(patch ?? '0', 10) || 0,
+            ];
+        };
+        const requiredNode: [number, number, number] = [20, 18, 1];
+        const [curMajor, curMinor, curPatch] = parseSemver(nodeVersion);
+        const [reqMajor, reqMinor, reqPatch] = requiredNode;
+        const meetsRequirement =
+            curMajor > reqMajor ||
+            (curMajor === reqMajor && curMinor > reqMinor) ||
+            (curMajor === reqMajor && curMinor === reqMinor && curPatch >= reqPatch);
+
+        if (meetsRequirement) {
             output.log(`${ok('✓')} Node.js ${nodeVersion}`);
         } else {
-            output.log(`${err('✗')} Node.js ${nodeVersion} (Required: >=18)`);
+            output.log(`${err('✗')} Node.js ${nodeVersion} (Required: >=20.18.1)`);
         }
 
         // 2. Config Check

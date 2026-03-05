@@ -91,7 +91,7 @@ JSON Response:`;
             );
 
             if (resp.status >= 400) {
-                throw new Error(`Ollama API failed with status ${resp.status}: ${typeof resp.body === 'string' ? resp.body.slice(0, 500) : resp.body.toString('utf-8').slice(0, 500)}`);
+                throw new Error(`Ollama API failed with status ${resp.status} (model: ${model}): ${typeof resp.body === 'string' ? resp.body.slice(0, 500) : resp.body.toString('utf-8').slice(0, 500)}`);
             }
 
             const raw = typeof resp.body === 'string' ? resp.body : resp.body.toString('utf-8');

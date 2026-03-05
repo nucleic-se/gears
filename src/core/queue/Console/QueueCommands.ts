@@ -228,13 +228,24 @@ export function queueCommands(): CommandDefinition[] {
             action: async (args, app, _output?: ICommandOutput) => {
                 const logger = app.make('ILogger') as ILogger;
                 const queue = app.make('IQueue') as IQueue;
+                const type = typeof args.type === 'string' && args.type.trim() ? args.type.trim() : undefined;
 
-                // Use recover with 0 timeout to requeue ALL processing jobs regardless of age
-                const count = await queue.recover(0);
+                let count = 0;
+                if (!type) {
+                    // Requeue all processing jobs regardless of age.
+                    count = await queue.recover(0);
+                } else {
+                    // IQueue has no bulk "requeue by type", so we filter processing jobs then release each one.
+                    const jobs = await queue.list('processing', Number.MAX_SAFE_INTEGER, type);
+                    for (const job of jobs) {
+                        await queue.release(job.id);
+                    }
+                    count = jobs.length;
+                }
 
-                logger.info('Requeued processing jobs', { count });
+                logger.info('Requeued processing jobs', { count, type });
                 if (count === 0) {
-                    logger.warn('No processing jobs found');
+                    logger.warn('No processing jobs found', { type });
                 }
             }
         }

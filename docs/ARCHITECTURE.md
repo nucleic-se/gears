@@ -148,9 +148,12 @@ This simplicity works because the entire system runs in one process — no need 
 | `IMutex` | `SQLiteMutex` |
 | `IScheduler` | `CronScheduler` (mutex-backed) |
 | `IEventBus` | `EventBus` |
+| `IDurableEventBus` | `SQLiteDurableEventBus` (cross-process delivery) |
 | `IFetcher` | `RateLimitedFetcher` (1s default) |
 | `IHtmlParser` | `CheerioParser` |
-| `ILLMProvider` | `OllamaLLMProvider` |
+| `ILLMProvider` | `createLLMProvider()` via `LLM_PROVIDER` (`ollama` \| `anthropic` \| `gemini`) |
+| `IAIPromptService` | `AIPromptService` |
+| `IAIActionRegistry` | `AIActionRegistry` |
 | `IMetrics` | `SQLiteMetrics` |
 | `BundleManager` | `BundleManager` |
 
@@ -260,7 +263,7 @@ The in-process event bus (`IEventBus`) is for intra-process events only. For cro
 
 ## LLM Integration
 
-A core `ILLMProvider` interface provides structured JSON output via Ollama. Core AI services in `src/core/ai` provide higher-level APIs:
+A core `ILLMProvider` interface provides structured JSON output. Provider selection is runtime-configured via `LLM_PROVIDER` (`ollama`, `anthropic`, `gemini`), with `ollama` as default. Core AI services in `src/core/ai` provide higher-level APIs:
 
 - **IAIPromptService** — Fluent prompt builder (`.system()`, `.user()`, `.schema()`, `.run()`)
 - **IAIPipeline** — Chainable pipeline (`.llm()`, `.pipe()`, `.transform()`, `.validate()`, `.retry()`, `.clog()`, `.catch()`)
@@ -272,11 +275,11 @@ A core `ILLMProvider` interface provides structured JSON output via Ollama. Core
 
 | Use Case | Key Features Used |
 |----------|-------------------|
-| Background agents / chatrooms | Queue, LLM integration, Store, Vectors |
+| Background agents / chatrooms | Queue, LLM integration, Store |
 | Local automation (IFTTT-style) | Scheduler, EventBus, Bundles |
 | Data pipelines / ETL | Queue (job chaining), Store |
 | Web crawlers / scrapers | Queue, Scheduler, Store, Fetcher |
-| Monitoring / watchdogs | Scheduler, Notifications |
+| Monitoring / watchdogs | Scheduler, Metrics, `gears top` |
 | CI/CD helpers | Queue, CLI commands |
 
 gears is **not** suited for:

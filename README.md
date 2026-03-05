@@ -18,6 +18,8 @@ npm install
 npm run build
 ```
 
+Node.js requirement: `>=20.18.1`
+
 Run the worker:
 ```bash
 npx gears work
@@ -64,9 +66,24 @@ The app database (Kysely) uses:
 
 ## Environment Variables
 ```bash
+LLM_PROVIDER=ollama
+
 OLLAMA_HOST=http://localhost:11434
 OLLAMA_MODEL=llama3.1:8b
 OLLAMA_EMBED_MODEL=nomic-embed-text:latest
+OLLAMA_API_KEY=
+OLLAMA_EMBED_HOST=
+OLLAMA_TIMEOUT_MS=120000
+OLLAMA_RETRIES=0
+
+ANTHROPIC_API_KEY=
+ANTHROPIC_MODEL=claude-sonnet-4-6
+ANTHROPIC_MAX_TOKENS=4096
+
+GEMINI_API_KEY=
+GEMINI_MODEL=gemini-2.0-flash
+GEMINI_EMBED_MODEL=text-embedding-004
+GEMINI_TIMEOUT_MS=120000
 
 WORKER_CONCURRENCY=5
 WORKER_POLL_INTERVAL_MS=1000

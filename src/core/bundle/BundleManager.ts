@@ -21,6 +21,10 @@ export class BundleManager {
         'bundles',
         'load',
         'unload',
+        'doctor',
+        'top',
+        'store',
+        'queue',
     ]);
     private app: Container;
     private logger: ILogger;
