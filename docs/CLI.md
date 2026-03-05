@@ -44,7 +44,7 @@ All flags have matching environment variables (e.g. `WORKER_CONCURRENCY`).
 
 ```bash
 npx gears queue stats                      # Queue metrics overview
-npx gears queue list <status>              # List jobs (pending/processing/failed/completed)
+npx gears queue list [status]              # List jobs (default status: failed)
 npx gears queue list failed --type <type>  # Filter by job type
 npx gears queue inspect <jobId>            # Show job details
 npx gears queue retry <jobId>              # Retry a specific failed job
