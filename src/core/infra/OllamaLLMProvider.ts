@@ -69,6 +69,7 @@ JSON Response:`;
             format: 'json',
             options: {
                 temperature: request.temperature ?? 0,
+                num_ctx: 32768,
                 num_predict: 16384,
             }
         };
@@ -81,10 +82,12 @@ JSON Response:`;
             };
             if (this.apiKey) headers['Authorization'] = `Bearer ${this.apiKey}`;
 
+            const timeoutMs = Number(process.env.OLLAMA_TIMEOUT_MS || '120000');
+            const retries   = Number(process.env.OLLAMA_RETRIES   || '0');
             const resp = await this.fetcher.post(
                 `${this.baseUrl}/api/generate`,
                 JSON.stringify(payload),
-                { headers, timeout: 300_000, retries: 2 },
+                { headers, timeout: timeoutMs, retries },
             );
 
             if (resp.status >= 400) {

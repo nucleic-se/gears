@@ -1,6 +1,7 @@
 import { GoogleGenAI } from '@google/genai';
 import { IMetrics } from '../metrics/interfaces.js';
 import { ILLMProvider, LLMRequest } from '../interfaces.js';
+import { toGeminiSchema } from './llmUtils.js';
 
 /**
  * GeminiLLMProvider - Integration with Google Gemini API via @google/genai
@@ -11,18 +12,21 @@ export class GeminiLLMProvider implements ILLMProvider {
     private defaultModel: string;
     private embedModel: string;
     private metrics?: IMetrics;
+    private timeoutMs: number;
 
     constructor(
         apiKey: string = process.env.GEMINI_API_KEY || '',
         defaultModel: string = process.env.GEMINI_MODEL || 'gemini-2.0-flash',
         metrics?: IMetrics,
         embedModel: string = process.env.GEMINI_EMBED_MODEL || 'text-embedding-004',
+        timeoutMs: number = Number(process.env.GEMINI_TIMEOUT_MS || '120000'),
     ) {
         if (!apiKey) throw new Error('GeminiLLMProvider: GEMINI_API_KEY is required');
         this.client = new GoogleGenAI({ apiKey });
         this.defaultModel = defaultModel;
         this.embedModel = embedModel;
         this.metrics = metrics;
+        this.timeoutMs = timeoutMs;
     }
 
     async process<T = any>(request: LLMRequest<T>): Promise<T> {
@@ -35,15 +39,21 @@ INPUT:
 ${request.text}`;
 
         try {
-            const response = await this.client.models.generateContent({
-                model,
-                contents: prompt,
-                config: {
-                    temperature: request.temperature ?? 0,
-                    responseMimeType: 'application/json',
-                    ...(request.schema ? { responseSchema: request.schema as any } : {}),
-                },
-            });
+            const timeout = new Promise<never>((_, reject) =>
+                setTimeout(() => reject(new Error(`GeminiLLMProvider: request timed out after ${this.timeoutMs}ms`)), this.timeoutMs),
+            );
+            const response = await Promise.race([
+                this.client.models.generateContent({
+                    model,
+                    contents: prompt,
+                    config: {
+                        temperature: request.temperature ?? 0,
+                        responseMimeType: 'application/json',
+                        ...(request.schema ? { responseSchema: toGeminiSchema(request.schema as Record<string, unknown>) as any } : {}),
+                    },
+                }),
+                timeout,
+            ]);
 
             const duration = Date.now() - start;
             const text = response.text ?? '';
