@@ -11,7 +11,8 @@ describe('AIPipeline', () => {
     beforeEach(() => {
         container = new Container();
         mockLlmProvider = {
-            process: vi.fn(),
+            turn: vi.fn(),
+            structured: vi.fn(),
             embed: vi.fn()
         };
         container.singleton('ILLMProvider', () => mockLlmProvider);
@@ -28,49 +29,46 @@ describe('AIPipeline', () => {
     });
 
     it('should execute chained llm calls', async () => {
-        // Mock LLM responses
-        mockLlmProvider.process
-            .mockResolvedValueOnce({ response: 'Summary of input' }) // First LLM call
-            .mockResolvedValueOnce({ response: 'Spanish translation' }); // Second LLM call
+        mockLlmProvider.turn
+            .mockResolvedValueOnce({ message: { role: 'assistant', content: 'Summary of input' }, stopReason: 'end_turn', usage: { inputTokens: 0, outputTokens: 0 } })
+            .mockResolvedValueOnce({ message: { role: 'assistant', content: 'Spanish translation' }, stopReason: 'end_turn', usage: { inputTokens: 0, outputTokens: 0 } });
 
         const result = await service.pipeline('original text')
             .llm(builder => builder.system('Summarize'))
-            .pipe(summary => summary + ' [verified]') // Intermediary sync step
+            .pipe(summary => summary + ' [verified]')
             .llm(builder => builder.system('Translate'))
             .run();
 
         expect(result).toBe('Spanish translation');
 
-        // Verify call 1
-        expect(mockLlmProvider.process).toHaveBeenNthCalledWith(1, expect.objectContaining({
-            instructions: 'Summarize',
-            text: 'original text'
+        expect(mockLlmProvider.turn).toHaveBeenNthCalledWith(1, expect.objectContaining({
+            system: 'Summarize',
+            messages: [{ role: 'user', content: 'original text' }]
         }));
 
-        // Verify call 2 (input should be the result of previous pipe)
-        expect(mockLlmProvider.process).toHaveBeenNthCalledWith(2, expect.objectContaining({
-            instructions: 'Translate',
-            text: 'Summary of input [verified]'
+        expect(mockLlmProvider.turn).toHaveBeenNthCalledWith(2, expect.objectContaining({
+            system: 'Translate',
+            messages: [{ role: 'user', content: 'Summary of input [verified]' }]
         }));
     });
     it('should retry failed steps', async () => {
         const error = new Error('Transient Error');
-        mockLlmProvider.process
-            .mockRejectedValueOnce(error) // Fail 1
-            .mockRejectedValueOnce(error) // Fail 2
-            .mockResolvedValue({ response: 'Success after retry' }); // Success 3
+        mockLlmProvider.turn
+            .mockRejectedValueOnce(error)
+            .mockRejectedValueOnce(error)
+            .mockResolvedValue({ message: { role: 'assistant', content: 'Success after retry' }, stopReason: 'end_turn', usage: { inputTokens: 0, outputTokens: 0 } });
 
         const result = await service.pipeline('input')
             .llm(b => b.system('Retry Test'), 'gpt-4', { retry: 3 })
             .run();
 
         expect(result).toBe('Success after retry');
-        expect(mockLlmProvider.process).toHaveBeenCalledTimes(3);
+        expect(mockLlmProvider.turn).toHaveBeenCalledTimes(3);
     });
 
     it('should catch errors globally', async () => {
         const error = new Error('Catastrophic Failure');
-        mockLlmProvider.process.mockRejectedValue(error);
+        mockLlmProvider.turn.mockRejectedValue(error);
 
         const result = await service.pipeline('input')
             .llm(b => b.system('Fail'))

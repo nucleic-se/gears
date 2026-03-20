@@ -66,9 +66,7 @@
     "zod": "^4.3.6"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.78.0",
-    "@google/genai": "^1.43.0",
-    "@nucleic-se/agentic": "^0.1.0",
+    "@nucleic-se/agentic": "git+ssh://git@github.com/nucleic-se/agentic.git",
     "better-sqlite3": "^12.6.2",
     "blessed": "^0.1.81",
     "blessed-contrib": "^4.11.0",

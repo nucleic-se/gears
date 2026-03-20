@@ -1,13 +1,12 @@
 import type { ILLMProvider } from '../interfaces.js';
 import type { IMetrics } from '../metrics/interfaces.js';
-import type { IFetcher } from '../interfaces.js';
 
 export interface LLMProviderOptions {
     /** Provider name: 'ollama' | 'anthropic' | 'gemini'. Falls back to LLM_PROVIDER env var, then 'ollama'. */
     provider?: string;
     metrics?: IMetrics;
-    /** Injected for Ollama; ignored by other providers. */
-    fetcher?: IFetcher;
+    /** Override the default model for this provider instance. For Ollama: overrides OLLAMA_MODEL env var. */
+    model?: string;
 }
 
 export async function createLLMProvider(options: LLMProviderOptions = {}): Promise<ILLMProvider> {
@@ -24,9 +23,7 @@ export async function createLLMProvider(options: LLMProviderOptions = {}): Promi
         case 'ollama': {
             const { OllamaLLMProvider } = await import('./OllamaLLMProvider.js');
             return new OllamaLLMProvider(
-                undefined, undefined, options.metrics,
-                undefined, undefined, undefined,
-                options.fetcher,
+                undefined, options.model, options.metrics,
             );
         }
         default:

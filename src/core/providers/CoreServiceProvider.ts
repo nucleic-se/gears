@@ -78,7 +78,6 @@ export class CoreServiceProvider extends ServiceProvider {
         // Resolved here (async) so provider modules are only loaded when actually needed.
         const provider = await createLLMProvider({
             metrics: this.app.makeOrNull('IMetrics') ?? undefined,
-            fetcher: this.app.make('IFetcher'),
         });
         this.app.singleton('ILLMProvider', () => provider);
     }

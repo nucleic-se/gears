@@ -172,6 +172,15 @@ export interface IStore {
 
 // --- LLM Abstraction (re-exported from @nucleic-se/agentic) ---
 
-export type { ILLMProvider, LLMRequest } from '@nucleic-se/agentic/contracts';
+export type {
+    ILLMProvider,
+    StructuredRequest,
+    StructuredResponse,
+    TurnRequest,
+    TurnResponse,
+    Message,
+    TokenUsage,
+    StopReason,
+} from '@nucleic-se/agentic/contracts';
 
 export * from './metrics/interfaces.js';
