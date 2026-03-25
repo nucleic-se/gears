@@ -55,9 +55,10 @@ export class PinoLogger implements ILogger {
             level = 'debug';
         }
 
+        const streamsWithLevel = streams.map(s => ({ ...s, level }));
         this.logger = pino({
             level: level,
-        }, pino.multistream(streams));
+        }, pino.multistream(streamsWithLevel));
     }
 
     debug(message: string, context?: object): void {
