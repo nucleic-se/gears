@@ -28,6 +28,16 @@ export type JobHandler<T = any> = (job: Job<T>) => Promise<void>;
 export interface IQueue {
     add(type: string, payload: any, options?: JobOptions): Promise<Job>;
     addDelayed(type: string, payload: any, delayMs: number, options?: JobOptions): Promise<Job>;
+    /**
+     * Upsert a named delayed job — create it if it doesn't exist, or push its
+     * fire time to `now + delayMs` if it does. Only bumps pending jobs; a job
+     * already processing is left untouched.
+     *
+     * Useful for debounced background work (e.g. flush after inactivity):
+     * call `bump(name, ...)` on every relevant event and the job fires once,
+     * after the last call.
+     */
+    bump(name: string, type: string, payload: any, delayMs: number, options?: JobOptions): Promise<void>;
     list(status: Job['status'], limit?: number, type?: string): Promise<Job[]>;
     get(jobId: string): Promise<Job | null>;
     delete(jobId: string): Promise<boolean>;

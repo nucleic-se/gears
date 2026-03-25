@@ -71,7 +71,15 @@ export class SQLiteQueue implements IQueue {
             (db: Database.Database) => {
                 const addColumn = (sql: string) => { try { db.exec(sql); } catch (e) { } };
                 addColumn('ALTER TABLE jobs ADD COLUMN expires_at INTEGER');
-            }
+            },
+            // Version 3: Named jobs (bump/debounce support)
+            (db: Database.Database) => {
+                const addColumn = (sql: string) => { try { db.exec(sql); } catch (e) { } };
+                addColumn('ALTER TABLE jobs ADD COLUMN name TEXT');
+                // SQLite allows multiple NULLs in a UNIQUE index, so non-partial is safe here.
+                // ON CONFLICT(name) in INSERT upserts requires a non-partial unique index.
+                db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_name ON jobs(name)');
+            },
         ];
 
         // 4. Run Migrations
@@ -201,6 +209,28 @@ export class SQLiteQueue implements IQueue {
             priority,
             error: null
         };
+    }
+
+    async bump(name: string, type: string, payload: any, delayMs: number, options: JobOptions = {}): Promise<void> {
+        if (!name || !name.trim()) throw new Error('bump: name cannot be empty');
+        if (!type || !type.trim()) throw new Error('bump: type cannot be empty');
+
+        const now = Date.now();
+        const scheduled_at = now + delayMs;
+        const stuckTimeoutMs = options.stuckTimeoutMs ?? null;
+        const priority = options.priority ?? 0;
+        const expiresAt = options.ttlMs ? now + options.ttlMs : null;
+        const id = randomUUID();
+
+        this.db.prepare(`
+            INSERT INTO jobs (id, name, type, payload, status, created_at, updated_at, scheduled_at, attempts, options, stuck_timeout_ms, priority, expires_at)
+            VALUES (?, ?, ?, ?, 'pending', ?, ?, ?, 0, ?, ?, ?, ?)
+            ON CONFLICT(name) DO UPDATE SET
+                scheduled_at = excluded.scheduled_at,
+                updated_at   = excluded.updated_at,
+                payload      = excluded.payload
+            WHERE jobs.status = 'pending'
+        `).run(id, name, type, JSON.stringify(payload), now, now, scheduled_at, JSON.stringify(options), stuckTimeoutMs, priority, expiresAt);
     }
 
     async list(status: Job['status'], limit: number = 20, type?: string): Promise<Job[]> {

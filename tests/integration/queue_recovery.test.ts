@@ -72,4 +72,35 @@ describe('Queue Recovery', () => {
 
         dbHack.close();
     });
+
+    it('bump: creates a new named delayed job', async () => {
+        await queue.bump('flush:chat-1', 'memory.flush', { chatId: 'chat-1' }, 5000);
+        const jobs = await queue.list('pending');
+        expect(jobs).toHaveLength(1);
+        expect(jobs[0].type).toBe('memory.flush');
+    });
+
+    it('bump: resets fire time on second call, no duplicate', async () => {
+        await queue.bump('flush:chat-1', 'memory.flush', { chatId: 'chat-1' }, 5000);
+        const first = await queue.list('pending');
+        const firstScheduled = first[0].scheduled_at!;
+
+        await new Promise(r => setTimeout(r, 10));
+        await queue.bump('flush:chat-1', 'memory.flush', { chatId: 'chat-1' }, 5000);
+
+        const all = await queue.list('pending');
+        expect(all).toHaveLength(1); // still only one
+        expect(all[0].scheduled_at!).toBeGreaterThan(firstScheduled); // fire time bumped
+    });
+
+    it('bump: leaves a processing job untouched', async () => {
+        await queue.bump('flush:chat-1', 'memory.flush', { chatId: 'chat-1' }, 0);
+        await queue.pop(); // moves to processing
+
+        // bump again — should be a no-op (WHERE status = 'pending' not satisfied)
+        await queue.bump('flush:chat-1', 'memory.flush', { chatId: 'chat-1' }, 5000);
+
+        const processing = await queue.list('processing');
+        expect(processing).toHaveLength(1); // still processing, not cancelled
+    });
 });
