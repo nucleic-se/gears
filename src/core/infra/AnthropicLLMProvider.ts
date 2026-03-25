@@ -13,12 +13,16 @@ export class AnthropicLLMProvider implements ILLMProvider {
     private metrics?: IMetrics;
 
     constructor(
-        apiKey: string = process.env.ANTHROPIC_API_KEY || '',
-        defaultModel: string = process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-6',
+        apiKey?: string,
+        defaultModel?: string,
         metrics?: IMetrics,
-        maxTokens: number = Number(process.env.ANTHROPIC_MAX_TOKENS || 4096),
+        maxTokens?: number,
     ) {
+        apiKey = apiKey || process.env.ANTHROPIC_API_KEY || '';
         if (!apiKey) throw new Error('AnthropicLLMProvider: ANTHROPIC_API_KEY is required');
+        defaultModel = defaultModel || process.env.ANTHROPIC_MODEL || '';
+        if (!defaultModel) throw new Error('AnthropicLLMProvider: ANTHROPIC_MODEL is required');
+        maxTokens = maxTokens ?? Number(process.env.ANTHROPIC_MAX_TOKENS || 4096);
         this.model = defaultModel;
         this.metrics = metrics;
         this.provider = new AnthropicProvider({

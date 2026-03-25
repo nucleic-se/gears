@@ -60,7 +60,8 @@ export class CoreServiceProvider extends ServiceProvider {
         // HTML Parser
         this.app.singleton('IHtmlParser', () => new CheerioParser());
 
-        // ILLMProvider is resolved asynchronously in boot() to support lazy provider loading.
+        // ILLMProvider — deferred to boot(). Only created if LLM_PROVIDER is set.
+        // Bundles that bring their own LLM providers (like Ivy) don't need this.
 
         // Core AI abstractions built on top of ILLMProvider
         this.app.singleton('IAIPromptService', (app) => new AIPromptService(app));
@@ -74,11 +75,13 @@ export class CoreServiceProvider extends ServiceProvider {
     }
 
     async boot(): Promise<void> {
-        // LLM Provider — switch via LLM_PROVIDER=anthropic|gemini|ollama (default: ollama)
-        // Resolved here (async) so provider modules are only loaded when actually needed.
-        const provider = await createLLMProvider({
-            metrics: this.app.makeOrNull('IMetrics') ?? undefined,
-        });
-        this.app.singleton('ILLMProvider', () => provider);
+        // Only create ILLMProvider if LLM_PROVIDER is explicitly configured.
+        // Bundles that bring their own LLM (like Ivy with agentic providers) skip this entirely.
+        if (process.env.LLM_PROVIDER) {
+            const provider = await createLLMProvider({
+                metrics: this.app.makeOrNull('IMetrics') ?? undefined,
+            });
+            this.app.singleton('ILLMProvider', () => provider);
+        }
     }
 }

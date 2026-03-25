@@ -60,14 +60,20 @@ export class GeminiLLMProvider implements ILLMProvider {
     private baseUrl: string;
 
     constructor(
-        apiKey: string = process.env.GEMINI_API_KEY || '',
-        defaultModel: string = process.env.GEMINI_MODEL || 'gemini-2.0-flash',
+        apiKey?: string,
+        defaultModel?: string,
         metrics?: IMetrics,
-        embedModel: string = process.env.GEMINI_EMBED_MODEL || 'text-embedding-004',
-        timeoutMs: number = Number(process.env.GEMINI_TIMEOUT_MS || '120000'),
-        baseUrl: string = process.env.GEMINI_BASE_URL || 'https://generativelanguage.googleapis.com/v1beta',
+        embedModel?: string,
+        timeoutMs?: number,
+        baseUrl?: string,
     ) {
+        apiKey = apiKey || process.env.GEMINI_API_KEY || '';
         if (!apiKey) throw new Error('GeminiLLMProvider: GEMINI_API_KEY is required');
+        defaultModel = defaultModel || process.env.GEMINI_MODEL || '';
+        if (!defaultModel) throw new Error('GeminiLLMProvider: GEMINI_MODEL is required');
+        embedModel = embedModel || process.env.GEMINI_EMBED_MODEL || defaultModel;
+        timeoutMs = timeoutMs ?? Number(process.env.GEMINI_TIMEOUT_MS || '120000');
+        baseUrl = baseUrl || process.env.GEMINI_BASE_URL || 'https://generativelanguage.googleapis.com/v1beta';
         this.apiKey = apiKey;
         this.defaultModel = defaultModel;
         this.embedModel = embedModel;

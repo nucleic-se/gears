@@ -14,11 +14,18 @@ export class OllamaLLMProvider implements ILLMProvider {
 
     constructor(
         baseUrl: string = process.env.OLLAMA_HOST || 'http://localhost:11434',
-        defaultModel: string = process.env.OLLAMA_MODEL || 'llama3.1:8b',
+        defaultModel?: string,
         metrics?: IMetrics,
-        embedModel: string = process.env.OLLAMA_EMBED_MODEL || 'nomic-embed-text:latest',
+        embedModel?: string,
         apiKey: string = process.env.OLLAMA_API_KEY || '',
     ) {
+        if (!defaultModel) {
+            defaultModel = process.env.OLLAMA_MODEL ?? ''
+            if (!defaultModel) throw new Error('OllamaLLMProvider: OLLAMA_MODEL is required')
+        }
+        if (!embedModel) {
+            embedModel = process.env.OLLAMA_EMBED_MODEL ?? defaultModel
+        }
         this.model = defaultModel;
         this.metrics = metrics;
         this.provider = new OllamaProvider({

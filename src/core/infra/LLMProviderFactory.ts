@@ -10,7 +10,8 @@ export interface LLMProviderOptions {
 }
 
 export async function createLLMProvider(options: LLMProviderOptions = {}): Promise<ILLMProvider> {
-    const name = (options.provider ?? process.env.LLM_PROVIDER ?? 'ollama').toLowerCase();
+    const name = (options.provider ?? process.env.LLM_PROVIDER ?? '').toLowerCase();
+    if (!name) throw new Error('LLM_PROVIDER is required. Set it to: anthropic, gemini, or ollama');
     switch (name) {
         case 'anthropic': {
             const { AnthropicLLMProvider } = await import('./AnthropicLLMProvider.js');
