@@ -66,7 +66,7 @@
     "zod": "^4.3.6"
   },
   "dependencies": {
-    "@nucleic-se/agentic": "git+ssh://git@github.com/nucleic-se/agentic.git",
+    "@nucleic-se/agentic": "github:nucleic-se/agentic",
     "better-sqlite3": "^12.6.2",
     "blessed": "^0.1.81",
     "blessed-contrib": "^4.11.0",
