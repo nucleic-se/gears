@@ -30,6 +30,10 @@
     "./testing": {
       "types": "./dist/src/testing.d.ts",
       "import": "./dist/src/testing.js"
+    },
+    "./database": {
+      "types": "./dist/src/bundles/database/index.d.ts",
+      "import": "./dist/src/bundles/database/index.js"
     }
   },
   "bin": {

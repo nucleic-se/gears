@@ -1,6 +1,12 @@
 import path from 'path';
 import fs from 'fs';
 
+let configuredDataDir: string | undefined;
+
+export function setDataDir(dataDir?: string): void {
+    configuredDataDir = dataDir ? path.resolve(dataDir) : undefined;
+}
+
 /**
  * Get the absolute path to the data directory.
  * 
@@ -11,7 +17,7 @@ import fs from 'fs';
  * @throws Error if GEARS_DATA_DIR is not set or not absolute
  */
 export function getDataDir(): string {
-    let dataDir = process.env.GEARS_DATA_DIR;
+    let dataDir = configuredDataDir ?? process.env.GEARS_DATA_DIR;
 
     if (!dataDir) {
         dataDir = path.resolve(process.cwd(), '.gears');

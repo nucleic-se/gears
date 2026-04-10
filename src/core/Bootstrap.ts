@@ -5,6 +5,7 @@ import { boot } from '../index.js';
 export interface BootstrapOptions {
     mode?: OutputMode;
     debug?: boolean;
+    dataDir?: string;
 }
 
 export class Bootstrap {
@@ -21,7 +22,7 @@ export class Bootstrap {
             debug: options.debug
         }));
 
-        await boot(app);
+        await boot(app, { dataDir: options.dataDir });
 
         return app;
     }

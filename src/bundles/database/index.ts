@@ -8,6 +8,8 @@ declare module '../../core/services.js' {
     }
 }
 
+export { DatabaseServiceProvider };
+
 export const bundle: Bundle = {
     name: 'database',
     version: '0.1.0',
