@@ -1,10 +1,9 @@
 import { ServiceProvider } from '../../core/container/ServiceProvider.js';
 import { getDbPath } from '../../core/utils/paths.js';
-import { ILogger } from '../../core/interfaces.js';
 import Database from 'better-sqlite3';
-import { Kysely, SqliteDialect } from 'kysely';
+import { Kysely, SqliteDialect, sql } from 'kysely';
 
-export type DatabaseSchema = any;
+import type { DatabaseSchema } from './index.js';
 
 export class DatabaseServiceProvider extends ServiceProvider {
     async register(): Promise<void> {
@@ -27,8 +26,8 @@ export class DatabaseServiceProvider extends ServiceProvider {
             }
         });
 
-        // Patch close() for Container disposal
-        (db as any).close = async () => {
+        // Patch close() for Container disposal.
+        (db as Kysely<DatabaseSchema> & { close?: () => Promise<void> }).close = async () => {
             await db.destroy();
             if (nativeDb.open) nativeDb.close();
         };
@@ -38,8 +37,7 @@ export class DatabaseServiceProvider extends ServiceProvider {
 
     async boot(): Promise<void> {
         const db = this.app.make('db');
-        // Verify connection (safe to do here as 'db' is already registered)
-        await db.selectFrom('sqlite_master').select('name').execute();
+        await sql.raw('select 1').execute(db);
 
         if (this.app.bound('ILogger')) {
             this.app.make('ILogger').info('App database ready');
@@ -47,13 +45,6 @@ export class DatabaseServiceProvider extends ServiceProvider {
     }
 
     async dispose(): Promise<void> {
-        // "db" service disposal is handled by Container calling (db as any).close()
-        // But if the Provider held separate resources (like nativeDb reference outside of Kysely),
-        // we would close them here.
-        // Currently, nativeDb is passed to Kysely and Kysely.destroy() is mapped to close().
-        // So standard Container shutdown covers it.
-        //
-        // However, to satisfy L1 "DatabaseServiceProvider does not formally implement IDisposable",
-        // we add the method.
+        // "db" service disposal is handled by Container via the patched close() method.
     }
 }
