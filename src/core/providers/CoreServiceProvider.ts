@@ -43,7 +43,8 @@ export class CoreServiceProvider extends ServiceProvider {
         this.app.singleton('IMutex', () => new SQLiteMutex());
         this.app.singleton('IScheduler', (app) => {
             const timezone = process.env.GEARS_TIMEZONE || undefined;
-            return new CronScheduler(app.make('IMutex'), app.make('ILogger'), { timezone });
+            const shared = app.make('SharedDatabase') as { db: import('better-sqlite3').Database };
+            return new CronScheduler(app.make('IMutex'), app.make('ILogger'), { timezone, db: shared.db });
         });
 
         this.app.singleton('IEventBus', (app) => new EventBus(app));

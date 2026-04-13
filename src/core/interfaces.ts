@@ -53,6 +53,13 @@ export interface IScheduler {
     unschedule(jobName: string): void;
 
     /**
+     * List all currently scheduled jobs.
+     * When persistence is enabled, returns all persisted jobs including dormant ones
+     * (persisted but not yet re-registered after a restart). `active` is false for dormant jobs.
+     */
+    list(): Promise<Array<{ name: string; expression: string; active: boolean }>>;
+
+    /**
      * Stop all scheduled jobs.
      */
     stopAll(): void;
