@@ -1,5 +1,5 @@
-import { ZodSchema } from 'zod';
 import { ILogger } from '../interfaces.js';
+import type { IJobRegistry, JobDefinition, ValidationSchema } from './interfaces.js';
 
 export class JobValidationError extends Error {
     constructor(message: string) {
@@ -8,13 +8,7 @@ export class JobValidationError extends Error {
     }
 }
 
-export interface JobDefinition<T = any> {
-    type: string;
-    schema?: ZodSchema<T>;
-    description?: string;
-}
-
-export class JobRegistry {
+export class JobRegistry implements IJobRegistry {
     private definitions = new Map<string, JobDefinition>();
     private logger: ILogger;
 
@@ -22,7 +16,7 @@ export class JobRegistry {
         this.logger = logger;
     }
 
-    register<T>(type: string, schema?: ZodSchema<T>, description?: string): void {
+    register<T>(type: string, schema?: ValidationSchema<T>, description?: string): void {
         this.definitions.set(type, { type, schema, description });
         this.logger.debug(`Registered job type: ${type}`);
     }

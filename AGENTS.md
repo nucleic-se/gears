@@ -6,7 +6,7 @@ This project is built **with** the user, not just **for** the user.
 - **Iterative development.** Build small, verify, then expand.
 
 ## 2. Clean Architecture
-- **Separation of Concerns.** Keep the agentic logic, storage, and processing distinct.
+- **Separation of Concerns.** Keep application logic, storage, and processing distinct.
 - **Dependency Rule.** Source code dependencies should only point inwards. Inner circles (Entities) know nothing about outer circles (Database, Web).
 
 ## 3. Simplicity & No Over-Engineering
@@ -23,5 +23,5 @@ This project is built **with** the user, not just **for** the user.
 - code should be self-documenting.
 - Comments explain *why*, not *what*.
 - Tests are not an afterthought.
-- **Do not change tests unless explicitly told to do so.**
-
+- Update tests whenever behavior changes. Never weaken or delete coverage unless
+  the covered feature is intentionally removed.

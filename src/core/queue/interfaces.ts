@@ -58,7 +58,20 @@ export interface IQueue {
     release(jobId: string): Promise<void>;
 }
 
-export interface JobDefinition<T = any> {
-    name: string;
-    schema: any; // Zod schema
+export interface ValidationSchema<T = unknown> {
+    safeParse(value: unknown):
+        | { success: true; data: T }
+        | { success: false; error: { message: string } };
+}
+
+export interface JobDefinition<T = unknown> {
+    type: string;
+    schema?: ValidationSchema<T>;
+    description?: string;
+}
+
+export interface IJobRegistry {
+    register<T>(type: string, schema?: ValidationSchema<T>, description?: string): void;
+    get(type: string): JobDefinition | undefined;
+    validate(type: string, payload: unknown): { valid: boolean; error?: string };
 }

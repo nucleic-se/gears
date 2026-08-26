@@ -6,13 +6,13 @@ This project uses consistent, explicit naming to reduce ambiguity and avoid coll
 - `PascalCase` for classes, types, enums, and interfaces.
 - Service-style interfaces usually use an `I` prefix (e.g. `ILogger`, `IStore`).
 - Option/config/result shapes may omit `I` (e.g. `FetchOptions`, `FetchResponse`, `CommandDefinition`).
-- Acronyms are all caps: `AI`, `LLM`, `SQL`, `HTTP`.
+- Acronyms are all caps: `SQL`, `HTTP`.
 
 Examples:
-- `CoreServiceProvider`, `IAIPromptService`, `ILLMProvider`, `CommandDefinition`.
+- `CoreServiceProvider`, `IStore`, `CommandDefinition`.
 
 ## Files
-- Class-centric files use the class name in `PascalCase` (e.g., `AIServiceProvider.ts`).
+- Class-centric files use the class name in `PascalCase` (e.g., `CoreServiceProvider.ts`).
 - Module/utility files are lowercase (e.g., `interfaces.ts`, `domain.ts`, `index.ts`).
 
 ## Folders

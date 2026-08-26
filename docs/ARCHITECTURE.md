@@ -85,6 +85,12 @@ Key configuration:
 
 ## Lifecycle Contracts
 
+The container's `ServiceMap` describes service contracts, not concrete runtime
+classes. This keeps `Container` consumers independent of implementation-only
+types such as Zod schemas and SQLite handles, and prevents those deep type graphs
+from leaking into downstream TypeScript builds. Concrete providers remain free
+to use those libraries behind the structural boundary.
+
 Bundles and providers follow a strict three-phase lifecycle:
 
 | Phase | What Happens | Side Effects |
@@ -151,9 +157,6 @@ This simplicity works because the entire system runs in one process — no need 
 | `IDurableEventBus` | `SQLiteDurableEventBus` (cross-process delivery) |
 | `IFetcher` | `RateLimitedFetcher` (1s default) |
 | `IHtmlParser` | `CheerioParser` |
-| `ILLMProvider` | `createLLMProvider()` via `LLM_PROVIDER` (`ollama` \| `anthropic` \| `gemini`) |
-| `IAIPromptService` | `AIPromptService` |
-| `IAIActionRegistry` | `AIActionRegistry` |
 | `IMetrics` | `SQLiteMetrics` |
 | `BundleManager` | `BundleManager` |
 
@@ -261,21 +264,11 @@ The in-process event bus (`IEventBus`) is for intra-process events only. For cro
 
 ---
 
-## LLM Integration
-
-A core `ILLMProvider` interface provides structured JSON output. Provider selection is runtime-configured via `LLM_PROVIDER` (`ollama`, `anthropic`, `gemini`), with `ollama` as default. Core AI services in `src/core/ai` provide higher-level APIs:
-
-- **IAIPromptService** — Fluent prompt builder (`.system()`, `.user()`, `.schema()`, `.run()`)
-- **IAIPipeline** — Chainable pipeline (`.llm()`, `.pipe()`, `.transform()`, `.validate()`, `.retry()`, `.clog()`, `.catch()`)
-- **IAIActionRegistry** — Tool/action registration for LLM-driven function calling
-
----
-
 ## Use Cases
 
 | Use Case | Key Features Used |
 |----------|-------------------|
-| Background agents / chatrooms | Queue, LLM integration, Store |
+| Background services | Queue, Scheduler, Store |
 | Local automation (IFTTT-style) | Scheduler, EventBus, Bundles |
 | Data pipelines / ETL | Queue (job chaining), Store |
 | Web crawlers / scrapers | Queue, Scheduler, Store, Fetcher |

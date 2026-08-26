@@ -1,15 +1,15 @@
 import Database from 'better-sqlite3';
-import { IQueue, Job, JobOptions } from './interfaces.js';
+import { IJobRegistry, IQueue, Job, JobOptions } from './interfaces.js';
 import { randomUUID } from 'crypto';
 import { getDbPath } from '../utils/paths.js';
-import { JobRegistry, JobValidationError } from './JobRegistry.js';
+import { JobValidationError } from './JobRegistry.js';
 
 export class SQLiteQueue implements IQueue {
     private db: Database.Database;
 
     constructor(
         dbPath: string = 'jobs.sqlite',
-        private jobRegistry?: JobRegistry
+        private jobRegistry?: IJobRegistry
     ) {
         const fullPath = getDbPath(dbPath);
         this.db = new Database(fullPath);

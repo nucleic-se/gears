@@ -33,19 +33,10 @@ gears/
 │   │   │   ├── CronScheduler.ts  # IScheduler with mutex locking
 │   │   │   ├── SQLiteMutex.ts    # IMutex (SQLite-backed)
 │   │   │   ├── SQLiteStore.ts    # IStore (SQLite-backed)
-│   │   │   ├── LLMProviderFactory.ts  # Runtime LLM provider selection
-│   │   │   ├── OllamaLLMProvider.ts   # ILLMProvider (Ollama)
-│   │   │   ├── AnthropicLLMProvider.ts# ILLMProvider (Anthropic)
-│   │   │   ├── GeminiLLMProvider.ts   # ILLMProvider (Gemini)
 │   │   │   ├── SQLiteDurableEventBus.ts # Cross-process event bus
 │   │   │   ├── RateLimitedFetcher.ts  # IFetcher with rate limiting
 │   │   │   ├── CheerioParser.ts  # IHtmlParser
 │   │   │   └── PidLocker.ts      # Single-worker enforcement
-│   │   ├── ai/
-│   │   │   ├── interfaces.ts     # Prompt/pipeline/action interfaces
-│   │   │   ├── PromptService.ts  # IAIPromptService implementation
-│   │   │   ├── Pipeline.ts       # IAIPipeline implementation
-│   │   │   └── AIActionRegistry.ts # IAIActionRegistry implementation
 │   │   ├── metrics/
 │   │   │   ├── interfaces.ts     # IMetrics interface
 │   │   │   └── SQLiteMetrics.ts  # SQLite-backed metrics
@@ -155,7 +146,6 @@ export const bundle: Bundle = {
 | `IEventBus` | `emit`, `emitStrict`, `on`, `off`, `clear`, `listenerCount` | EventBus |
 | `IDurableEventBus` | `emit`, `on`, `list`, `ack` | SQLiteDurableEventBus |
 | `IMetrics` | `increment`, `gauge`, `snapshot` | SQLiteMetrics |
-| `ILLMProvider` | `process`, `embed` | Selected via `LLM_PROVIDER` (`ollama`, `anthropic`, `gemini`) |
 | `IDisposable` | `dispose` | (pattern) |
 
 ### Event Bus

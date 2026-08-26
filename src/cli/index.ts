@@ -13,8 +13,8 @@ const program = new Command();
 
 program
     .name('gears')
-    .description('A specialized agentic worker framework for Node.js')
-    .version('0.1.0')
+    .description('A specialized worker framework for Node.js')
+    .version('0.2.0')
     .option('--output <mode>', 'Output mode (text, json, silent, tui)')
     .option('--debug', 'Enable debug logs')
     .exitOverride();
@@ -259,7 +259,7 @@ program
                 Number.parseInt(patch ?? '0', 10) || 0,
             ];
         };
-        const requiredNode: [number, number, number] = [20, 18, 1];
+        const requiredNode: [number, number, number] = [22, 0, 0];
         const [curMajor, curMinor, curPatch] = parseSemver(nodeVersion);
         const [reqMajor, reqMinor, reqPatch] = requiredNode;
         const meetsRequirement =
@@ -270,7 +270,7 @@ program
         if (meetsRequirement) {
             output.log(`${ok('✓')} Node.js ${nodeVersion}`);
         } else {
-            output.log(`${err('✗')} Node.js ${nodeVersion} (Required: >=20.18.1)`);
+            output.log(`${err('✗')} Node.js ${nodeVersion} (Required: >=22.0.0)`);
         }
 
         // 2. Config Check

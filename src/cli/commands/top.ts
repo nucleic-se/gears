@@ -1,11 +1,73 @@
 import blessed from 'blessed';
-import contrib from 'blessed-contrib';
 import { Container } from '../../core/container/Container.js';
 import { IMetrics, MetricSnapshot } from '../../core/metrics/interfaces.js';
 import { IQueue } from '../../core/queue/interfaces.js';
 import path from 'path';
 import fs from 'fs';
 import { getDataDir } from '../../core/utils/paths.js';
+
+export function createTopWidgets(screen: blessed.Widgets.Screen) {
+    const statusBox = blessed.box({
+        parent: screen,
+        top: 0,
+        left: 0,
+        width: '100%',
+        height: 3,
+        label: 'System Status',
+        border: { type: 'line' },
+        style: { border: { fg: 'cyan' } },
+        padding: { left: 1, right: 1 },
+    });
+
+    const queueTable = blessed.listtable({
+        parent: screen,
+        top: 3,
+        left: 0,
+        width: '50%',
+        height: '42%',
+        keys: true,
+        label: 'Queue Stats',
+        border: { type: 'line' },
+        style: {
+            border: { fg: 'cyan' },
+            header: { fg: 'cyan', bold: true },
+            cell: { fg: 'white' },
+        },
+        tags: false,
+    });
+
+    const metricsTable = blessed.listtable({
+        parent: screen,
+        top: 3,
+        left: '50%',
+        width: '50%',
+        height: '42%',
+        keys: true,
+        label: 'Key Metrics',
+        border: { type: 'line' },
+        style: {
+            border: { fg: 'green' },
+            header: { fg: 'green', bold: true },
+            cell: { fg: 'green' },
+        },
+        tags: false,
+    });
+
+    const logBox = blessed.log({
+        parent: screen,
+        top: '45%',
+        left: 0,
+        width: '100%',
+        height: '55%',
+        fg: 'green',
+        label: 'Recent Events',
+        border: { type: 'line' },
+        style: { border: { fg: 'green' } },
+        scrollable: true,
+    });
+
+    return { statusBox, queueTable, metricsTable, logBox };
+}
 
 export async function topCommand(app: Container) {
     const metrics = app.makeOrNull('IMetrics');
@@ -21,47 +83,7 @@ export async function topCommand(app: Container) {
         title: 'Gears Inspector'
     });
 
-    const grid = new contrib.grid({ rows: 12, cols: 12, screen: screen });
-
-    // 1. Status Bar (Top) - Markdown
-    const statusBox = grid.set(0, 0, 2, 12, contrib.markdown, {
-        label: 'System Status'
-    });
-
-    // 2. Queue Status (Left) - Table
-    const queueTable = grid.set(2, 0, 5, 6, contrib.table, {
-        keys: true,
-        fg: 'white',
-        selectedFg: 'white',
-        selectedBg: 'blue',
-        interactive: false,
-        label: 'Queue Stats',
-        width: '30%',
-        height: '30%',
-        border: { type: "line", fg: "cyan" },
-        columnSpacing: 5,
-        columnWidth: [15, 10, 10]
-    });
-
-    // 3. Metrics (Right) - Table
-    const metricsTable = grid.set(2, 6, 5, 6, contrib.table, {
-        keys: true,
-        fg: 'green',
-        selectedFg: 'white',
-        selectedBg: 'blue',
-        interactive: false,
-        label: 'Key Metrics',
-        border: { type: "line", fg: "green" },
-        columnSpacing: 5,
-        columnWidth: [25, 10, 15]
-    });
-
-    // 4. Log Tail (Bottom) - Log
-    const logBox = grid.set(7, 0, 5, 12, contrib.log, {
-        fg: "green",
-        selectedFg: "green",
-        label: 'Recent Events'
-    });
+    const { statusBox, queueTable, metricsTable, logBox } = createTopWidgets(screen);
 
     let refreshTimer: NodeJS.Timeout | null = null;
     let shuttingDown = false;
@@ -115,7 +137,7 @@ export async function topCommand(app: Container) {
             // Update Status
             const uptime = process.uptime().toFixed(0);
             const dbName = (queue as any).db?.name || 'SQLite';
-            (statusBox as any).setMarkdown(`**Gears Inspector** | Uptime: ${uptime}s | Connected to: ${dbName}`);
+            statusBox.setContent(`Gears Inspector | Uptime: ${uptime}s | Connected to: ${dbName}`);
 
             // Update Queue Stats
             const qStats = await queue.stats();
@@ -125,10 +147,10 @@ export async function topCommand(app: Container) {
                 ['Failed', String(qStats.overview.failed || 0)],
                 ['Completed', String(qStats.overview.completed || 0)]
             ];
-            queueTable.setData({
-                headers: ['Status', 'Count', 'Trend'],
-                data: qData.map(r => [...r, '-'])
-            });
+            queueTable.setData([
+                ['Status', 'Count', 'Trend'],
+                ...qData.map(r => [...r, '-']),
+            ]);
 
             // Update Metrics
             const snapshot = await metrics.snapshot();
@@ -141,10 +163,10 @@ export async function topCommand(app: Container) {
                 String(m.value),
                 m.tags.type || '-'
             ]);
-            metricsTable.setData({
-                headers: ['Metric', 'Value', 'Type'],
-                data: mData
-            });
+            metricsTable.setData([
+                ['Metric', 'Value', 'Type'],
+                ...mData,
+            ]);
 
             // Tail log lines from file
             try {

@@ -13,12 +13,13 @@ Updated to reflect the current `gears` codebase.
 - [x] **Unified CLI Bootstrapping**: `Bootstrap` class with output/debug options.
 - [x] **Standardized Error Handling**: `GearsError` base class, consistent `logger.error` usage.
 - [x] **Metrics Service (`IMetrics`)**: SQLite-backed counters and gauges.
-- [x] **Instrumentation**: Worker, Queue, and LLM providers emit metrics.
+- [x] **Instrumentation**: Worker and Queue emit metrics.
 - [x] **Gears Inspector (`gears top`)**: TUI showing queue stats, metrics, and log tail.
 - [x] **Cross-process EventBus**: `IDurableEventBus` / `SQLiteDurableEventBus`.
-- [x] **Node version checks aligned**: `doctor` and `package.json` now both require Node >= 20.18.1.
+- [x] **Node version checks aligned**: `doctor` and `package.json` now both require Node >= 22.0.0.
 - [x] **Queue requeue filter parity**: `queue requeue-all --type` now filters by job type.
 - [x] **Bundle command namespace hardening**: Additional core commands reserved for bundle names.
+- [x] **Lean container service contracts**: `ServiceMap` depends on structural contracts rather than concrete Zod/SQLite/bundle implementations; an Ivy consumer build verifies the public type graph stays tractable.
 
 ## Core Runtime
 
@@ -31,7 +32,6 @@ Updated to reflect the current `gears` codebase.
 
 ## Developer Experience
 
-- [ ] **Input validation in AIActionRegistry**: Validate payloads against `action.schema` before calling handlers.
 - [ ] **Required env var validation at boot**: Let bundles declare required env vars; surface them in `doctor`.
 - [ ] **`--dry-run` mode**: Validate config and bundle loading without starting workers.
 

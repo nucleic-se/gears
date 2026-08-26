@@ -8,11 +8,8 @@ import { SQLiteStore } from '../infra/SQLiteStore.js';
 import { SQLiteDurableEventBus } from '../infra/SQLiteDurableEventBus.js';
 import { EventBus } from '../events/EventBus.js';
 import { CheerioParser } from '../infra/CheerioParser.js';
-import { createLLMProvider } from '../infra/LLMProviderFactory.js';
 import { SQLiteMetrics } from '../metrics/SQLiteMetrics.js';
 import { SharedDatabase } from '../utils/SharedDatabase.js';
-import { AIPromptService } from '../ai/PromptService.js';
-import { AIActionRegistry } from '../ai/AIActionRegistry.js';
 
 export class CoreServiceProvider extends ServiceProvider {
     register(): void {
@@ -61,13 +58,6 @@ export class CoreServiceProvider extends ServiceProvider {
         // HTML Parser
         this.app.singleton('IHtmlParser', () => new CheerioParser());
 
-        // ILLMProvider — deferred to boot(). Only created if LLM_PROVIDER is set.
-        // Bundles that bring their own LLM providers (like Ivy) don't need this.
-
-        // Core AI abstractions built on top of ILLMProvider
-        this.app.singleton('IAIPromptService', (app) => new AIPromptService(app));
-        this.app.singleton('IAIActionRegistry', (app) => new AIActionRegistry(app));
-
         // Metrics
         this.app.singleton('IMetrics', (app) => {
             const shared = app.make('SharedDatabase');
@@ -75,14 +65,5 @@ export class CoreServiceProvider extends ServiceProvider {
         });
     }
 
-    async boot(): Promise<void> {
-        // Only create ILLMProvider if LLM_PROVIDER is explicitly configured.
-        // Bundles that bring their own LLM (like Ivy with agentic providers) skip this entirely.
-        if (process.env.LLM_PROVIDER) {
-            const provider = await createLLMProvider({
-                metrics: this.app.makeOrNull('IMetrics') ?? undefined,
-            });
-            this.app.singleton('ILLMProvider', () => provider);
-        }
-    }
+    async boot(): Promise<void> {}
 }
