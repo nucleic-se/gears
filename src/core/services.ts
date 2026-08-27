@@ -2,6 +2,7 @@
 import { ILogger, IScheduler, IMutex, IFetcher, IHtmlParser, IStore, IMetrics } from './interfaces.js';
 import { IQueue, IJobRegistry, JobHandler } from './queue/interfaces.js';
 import { IEventBus, IDurableEventBus } from './events/interfaces.js';
+import { IScheduledJobRegistrar } from './schedule/interfaces.js';
 
 /** Lean container contracts. Concrete infrastructure must not leak through ServiceMap. */
 export interface WorkerOptions {
@@ -53,6 +54,7 @@ export interface ServiceMap {
     'WorkerOptions': WorkerOptions;
     'JobRegistry': IJobRegistry;
     'JobHandlers': Map<string, JobHandler>;
+    'ScheduledJobs': IScheduledJobRegistrar;
     'IFetcher': IFetcher;
     'IHtmlParser': IHtmlParser;
     'IMetrics': IMetrics;

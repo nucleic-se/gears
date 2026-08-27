@@ -3,6 +3,7 @@ import { SQLiteQueue } from '../queue/SQLiteQueue.js';
 import { Worker, WorkerOptions } from '../queue/Worker.js';
 import { JobHandler } from '../queue/interfaces.js';
 import { JobRegistry } from '../queue/JobRegistry.js';
+import { ScheduledJobRegistrar } from '../schedule/ScheduledJobRegistrar.js';
 
 export class QueueServiceProvider extends ServiceProvider {
     register(): void {
@@ -41,5 +42,12 @@ export class QueueServiceProvider extends ServiceProvider {
         // Register Job Handler Registry
         // Handlers signature: (job: Job) => Promise<void>
         this.app.singleton('JobHandlers', () => new Map<string, JobHandler>());
+
+        // Declarative cron-to-queue bridge. Scheduled callbacks only enqueue;
+        // normal job handlers own all application work and retry semantics.
+        this.app.singleton('ScheduledJobs', (app) => new ScheduledJobRegistrar(
+            app.make('IScheduler'),
+            app.make('IQueue'),
+        ));
     }
 }

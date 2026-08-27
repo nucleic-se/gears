@@ -243,6 +243,31 @@ npx gears load ./dist/src/bundles/my-bundle
 
 ### Adding a Scheduled Task
 
+For application work, register a durable scheduled job. The cron callback only
+enqueues; the normal worker owns validation, retries, heartbeats, and execution:
+
+```typescript
+async boot(): Promise<void> {
+    const scheduled = this.app.make('ScheduledJobs');
+    scheduled.register({
+        id: 'my-bundle:daily-import',
+        cron: '0 6 * * *',
+        jobType: 'my-bundle.import',
+        payload: { source: 'daily' },
+        jobOptions: { maxRetries: 3 },
+    });
+
+    this.app.make('JobHandlers').set('my-bundle.import', async (job) => {
+        // The occurrence supplies scheduleId, scheduledFor, and an occurrenceId
+        // suitable for application-level idempotency.
+        await importSource(job.payload.payload.source, job.payload.occurrence);
+    });
+}
+```
+
+Use the lower-level callback form only for small process-local maintenance that
+does not need durable retry:
+
 ```typescript
 async init(app): Promise<void> {
     // init() runs only in worker mode; CLI commands skip it
@@ -257,8 +282,8 @@ async init(app): Promise<void> {
 Unschedule on shutdown:
 ```typescript
 async shutdown(app) {
-    const scheduler = app.make('IScheduler');
-    scheduler.unschedule('my-bundle:my-task');
+    app.make('ScheduledJobs').unregister('my-bundle:daily-import');
+    app.make('IScheduler').unschedule('my-bundle:my-task');
 }
 ```
 

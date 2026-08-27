@@ -4,6 +4,8 @@ export * from './core/container/Container.js';
 export * from './core/container/ServiceProvider.js';
 export * from './core/queue/interfaces.js';
 export * from './core/events/interfaces.js';
+export * from './core/schedule/interfaces.js';
+export { ScheduledJobRegistrar } from './core/schedule/ScheduledJobRegistrar.js';
 export { SQLiteDurableEventBus } from './core/infra/SQLiteDurableEventBus.js';
 
 // --- Bundle API (for external bundle authors) ---

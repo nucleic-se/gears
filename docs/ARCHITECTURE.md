@@ -175,6 +175,7 @@ This simplicity works because the entire system runs in one process — no need 
 | `Worker` | `Worker` (concurrent job processor) |
 | `JobRegistry` | `JobRegistry` (schema validation) |
 | `JobHandlers` | `Map<string, JobHandler>` |
+| `ScheduledJobs` | `ScheduledJobRegistrar` (cron-to-durable-job bridge) |
 
 ---
 
