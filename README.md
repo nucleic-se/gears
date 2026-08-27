@@ -1,8 +1,11 @@
 # Gears
 
-A modular, local-first runtime for long-running Node.js apps.
+A modular, local-first alpha runtime for long-running Node.js apps.
 
-Gears gives you a hardened worker, job queue, scheduler, and bundle system so you can build durable background apps without re‑building infrastructure every time.
+Gears provides a worker, SQLite job queue, scheduler, and bundle system so you
+can build durable single-machine background apps without rebuilding the same
+infrastructure every time. Its APIs may still change incompatibly while the
+framework is alpha.
 
 ## Highlights
 - Worker with retries, heartbeats, and recovery

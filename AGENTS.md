@@ -16,11 +16,12 @@ This project is built **with** the user, not just **for** the user.
 
 ## 4. Technology Stack
 - **Runtime:** Node.js
-- **Language:** TypeScript (preferred for strictness) or JavaScript (if simple) - *Wait for user confirmation on TS vs JS.*
+- **Language:** TypeScript. Use JavaScript only for a concrete interoperability
+  constraint and document why it is preferable in that case.
 - **Architecture:** Modular, service-based (e.g., WorkerService, StorageService).
 
 ## 5. Development Rules
-- code should be self-documenting.
+- Code should be self-documenting.
 - Comments explain *why*, not *what*.
 - Tests are not an afterthought.
 - Update tests whenever behavior changes. Never weaken or delete coverage unless

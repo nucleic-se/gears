@@ -136,9 +136,16 @@ The worker watches `bundles.json` for changes and reconciles automatically.
 The DI container is minimal by design:
 
 ```typescript
-app.bind('Key', (container) => new Service());      // Factory — new instance each time
-app.singleton('Key', (container) => new Service()); // Lazy singleton
-app.make<ILogger>('ILogger');                       // Resolve (type-safe via ServiceMap)
+declare module '@nucleic-se/gears' {
+  interface ServiceMap {
+    'example:factory': Service;
+    'example:singleton': Service;
+  }
+}
+
+app.bind('example:factory', () => new Service());
+app.singleton('example:singleton', () => new Service());
+app.make('example:singleton'); // Resolves as Service
 ```
 
 The container uses a typed `ServiceMap` registry so `app.make()` returns the correct type for known keys. Cycle detection prevents infinite resolution loops.
@@ -154,7 +161,7 @@ This simplicity works because the entire system runs in one process — no need 
 | `IMutex` | `SQLiteMutex` |
 | `IScheduler` | `CronScheduler` (mutex-backed) |
 | `IEventBus` | `EventBus` |
-| `IDurableEventBus` | `SQLiteDurableEventBus` (cross-process delivery) |
+| `IDurableEventBus` | `SQLiteDurableEventBus` (retained cross-process notification) |
 | `IFetcher` | `RateLimitedFetcher` (1s default) |
 | `IHtmlParser` | `CheerioParser` |
 | `IMetrics` | `SQLiteMetrics` |
@@ -248,7 +255,7 @@ export const bundle: Bundle = {
 Bundles communicate via a simple pub/sub event bus:
 
 ```typescript
-const events = app.make<IEventBus>('IEventBus');
+const events = app.make('IEventBus');
 
 // Emit (fire-and-forget — errors logged, not propagated)
 await events.emit('item:created', { id: '123' });
@@ -260,7 +267,12 @@ const unsub = events.on('item:created', async (payload) => { ... });
 await events.emitStrict('critical:event', data);
 ```
 
-The in-process event bus (`IEventBus`) is for intra-process events only. For cross-process communication, use `IDurableEventBus` — a SQLite-backed durable event bus that persists events and delivers them across processes via polling. Local subscribers fire immediately on emit; remote processes pick up events on the next poll cycle.
+The in-process event bus (`IEventBus`) is for intra-process events only. For
+cross-process notification, use `IDurableEventBus` — a SQLite-backed retained
+event log consumed through polling. Local subscribers fire immediately on emit;
+remote live consumers pick up events on the next poll cycle. It has no
+acknowledgement or offline-consumer guarantee, so work requiring redelivery
+belongs on `IQueue`.
 
 ---
 
@@ -314,4 +326,6 @@ The constraints are intentional:
 - External state enables hot reload
 - Minimal container reduces complexity
 
-If a system runs mostly on one machine, needs background work, benefits from plugins, values inspectability, and doesn't want infrastructure overhead — gears is a solid foundation.
+If a system runs mostly on one machine, needs background work, benefits from
+plugins, values inspectability, and does not want infrastructure overhead,
+Gears is a focused alpha candidate worth evaluating against that workload.

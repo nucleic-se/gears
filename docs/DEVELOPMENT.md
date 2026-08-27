@@ -51,13 +51,11 @@ gears/
 │   │       └── paths.ts          # Data directory + path traversal protection
 │   └── bundles/                  # Built-in bundles
 │       └── database/             # Kysely database provider
-├── examples/
-│   └── dungeon/                  # Example design/iteration docs
 ├── tests/
 │   ├── unit/                     # Unit tests
 │   └── integration/              # Integration tests
 ├── docs/                         # Documentation
-├── bundles.json                  # Active bundle paths (runtime)
+├── bundles.json                  # Generated active bundle paths, when bundles are loaded
 ├── tsconfig.json                 # TypeScript config
 └── vitest.config.ts              # Test config
 ```
@@ -66,15 +64,27 @@ gears/
 
 ### Container (Dependency Injection)
 
+`ServiceMap` is the compile-time registry. Applications extend it for their
+own keys instead of passing type arguments at each lookup:
+
+```typescript
+declare module '@nucleic-se/gears' {
+    interface ServiceMap {
+        'my-bundle:service': IMyService;
+        'my-bundle:store': IStore;
+    }
+}
+```
+
 ```typescript
 // Factory — new instance each time
-app.bind('IService', (container) => new Service());
+app.bind('my-bundle:service', (container) => new MyService());
 
 // Singleton — one instance, lazy-created
 app.singleton('ILogger', () => new PinoLogger());
 
 // Resolve (type-safe via ServiceMap)
-const logger = app.make<ILogger>('ILogger');
+const logger = app.make('ILogger');
 
 // Check existence
 if (app.bound('ILogger')) { ... }
@@ -88,12 +98,12 @@ Providers register services during boot. Two phases:
 class MyProvider extends ServiceProvider {
     register(): void {
         // Phase 1: Register bindings (no resolving other services)
-        this.app.singleton('IMyService', () => new MyService());
+        this.app.singleton('my-bundle:service', () => new MyService());
     }
 
     async boot(): Promise<void> {
         // Phase 2: Wire services (can resolve dependencies)
-        const events = this.app.make<IEventBus>('IEventBus');
+        const events = this.app.make('IEventBus');
         events.on('item:created', handler);
     }
 }
@@ -124,7 +134,7 @@ export const bundle: Bundle = {
         args: '<input>',
         options: [{ flags: '-v, --verbose', description: 'Verbose output' }],
         action: async (args, app) => {
-            const svc = app.make<IMyService>('IMyService');
+            const svc = app.make('my-bundle:service');
             // ...
         },
     }],
@@ -144,14 +154,14 @@ export const bundle: Bundle = {
 | `IMutex` | `acquire`, `refresh`, `release`, `close` | SQLiteMutex |
 | `IFetcher` | `get`, `post` | RateLimitedFetcher |
 | `IEventBus` | `emit`, `emitStrict`, `on`, `off`, `clear`, `listenerCount` | EventBus |
-| `IDurableEventBus` | `emit`, `on`, `list`, `ack` | SQLiteDurableEventBus |
+| `IDurableEventBus` | `emit`, `on`, `off`, `startPolling`, `stopPolling` | SQLiteDurableEventBus |
 | `IMetrics` | `increment`, `gauge`, `snapshot` | SQLiteMetrics |
 | `IDisposable` | `dispose` | (pattern) |
 
 ### Event Bus
 
 ```typescript
-const events = app.make<IEventBus>('IEventBus');
+const events = app.make('IEventBus');
 
 // Subscribe (returns unsubscribe function)
 const unsub = events.on('page:fetched', async (payload) => { ... });
@@ -170,13 +180,13 @@ Bundles should namespace their keys to avoid collisions:
 ```typescript
 register(): void {
     this.app.singleton('my-bundle:store', () => {
-        const store = this.app.make<IStore>('IStore');
+        const store = this.app.make('IStore');
         return store.namespace('my-bundle');
     });
 }
 
 // Usage — keys are prefixed automatically
-const store = app.make<IStore>('my-bundle:store');
+const store = app.make('my-bundle:store');
 await store.set('counter', 42);     // Stored as 'my-bundle:counter'
 await store.get<number>('counter'); // 42
 ```
@@ -187,11 +197,11 @@ Use `IStore` — it's backed by SQLite and shared across processes:
 
 ```typescript
 // Worker writes
-const store = app.make<IStore>('IStore').namespace('my-bundle');
+const store = app.make('IStore').namespace('my-bundle');
 await store.set('lastRun', Date.now());
 
 // CLI reads (same value, different process)
-const store = app.make<IStore>('IStore').namespace('my-bundle');
+const store = app.make('IStore').namespace('my-bundle');
 const lastRun = await store.get<number>('lastRun');
 ```
 
@@ -237,7 +247,7 @@ npx gears load ./dist/src/bundles/my-bundle
 async init(app): Promise<void> {
     // init() runs only in worker mode; CLI commands skip it
     // so scheduled tasks won't start during command execution.
-    const scheduler = app.make<IScheduler>('IScheduler');
+    const scheduler = app.make('IScheduler');
     scheduler.schedule('* * * * *', async () => {
         // runs every minute, mutex-protected
     }, 'my-bundle:my-task');
@@ -247,7 +257,7 @@ async init(app): Promise<void> {
 Unschedule on shutdown:
 ```typescript
 async shutdown(app) {
-    const scheduler = app.make<IScheduler>('IScheduler');
+    const scheduler = app.make('IScheduler');
     scheduler.unschedule('my-bundle:my-task');
 }
 ```
@@ -255,8 +265,8 @@ async shutdown(app) {
 ### Adding a Job Handler
 
 ```typescript
-register(): void {
-    const handlers = this.app.make<Map<string, Function>>('JobHandlers');
+async boot(): Promise<void> {
+    const handlers = this.app.make('JobHandlers');
     handlers.set('my-job-type', async (job) => {
         console.log('Processing:', job.payload);
     });
@@ -265,7 +275,7 @@ register(): void {
 
 Queue a job:
 ```typescript
-const queue = app.make<IQueue>('IQueue');
+const queue = app.make('IQueue');
 await queue.add('my-job-type', { data: 'value' });
 
 // Delayed job (run in 30 seconds)

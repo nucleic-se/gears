@@ -33,14 +33,25 @@ Providers follow a strict two-phase contract:
 - **`register()`** — Bind services to the container. No side effects. No resolving other services.
 - **`boot()`** — Wire listeners, run migrations, resolve dependencies. Must remain lightweight.
 
+Application and bundle keys should extend the exported `ServiceMap` so
+`Container.make()` remains type-safe:
+
+```typescript
+declare module '@nucleic-se/gears' {
+    interface ServiceMap {
+        'my-bundle:service': MyService;
+    }
+}
+```
+
 ```typescript
 class MyServiceProvider extends ServiceProvider {
     register(): void {
-        this.app.singleton('IMyService', () => new MyService());
+        this.app.singleton('my-bundle:service', () => new MyService());
     }
 
     async boot(): Promise<void> {
-        const events = this.app.make<IEventBus>('IEventBus');
+        const events = this.app.make('IEventBus');
         events.on('item:created', this.handleCreated.bind(this));
     }
 }
