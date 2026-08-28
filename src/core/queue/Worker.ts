@@ -195,7 +195,6 @@ export class Worker {
         const executionTimeoutMs = job.options?.executionTimeoutMs ?? this.defaultExecutionTimeoutMs;
 
         let heartbeatTimer: NodeJS.Timeout | null = null;
-        let executionTimer: NodeJS.Timeout | null = null; // Track timer to clear it
 
         if (heartbeatIntervalMs >= stuckTimeoutMs) {
             this.logger.warn(`Heartbeat interval is >= stuck timeout`, {
@@ -234,18 +233,7 @@ export class Worker {
             // Execute handler with optional timeout
             // Default to 5 minutes if not specified (0 in options means disabled, but we enforce a global default here for safety)
             const effectiveTimeoutMs = executionTimeoutMs > 0 ? executionTimeoutMs : 300_000;
-
-            if (effectiveTimeoutMs > 0) {
-                await Promise.race([
-                    handler(job),
-                    new Promise((_, reject) => {
-                        executionTimer = setTimeout(() => reject(new Error(`Timeout: Job exceeded ${effectiveTimeoutMs}ms`)), effectiveTimeoutMs);
-                    })
-                ]);
-            } else {
-                // Should not happen with default, but fallback
-                await handler(job);
-            }
+            await this.executeHandler(handler, job, effectiveTimeoutMs);
 
             try {
                 await this.queue.complete(job.id, job.claimToken ?? undefined);
@@ -302,8 +290,30 @@ export class Worker {
             }
         } finally {
             if (heartbeatTimer) clearInterval(heartbeatTimer);
-            if (executionTimer) clearTimeout(executionTimer);
             this.activeJobMap.delete(job.id); // Remove from tracking
+        }
+    }
+
+    private async executeHandler(handler: JobHandler, job: Job, timeoutMs: number): Promise<void> {
+        const controller = new AbortController();
+        let timeoutTimer: NodeJS.Timeout | undefined;
+        const timeoutError = new Error(`Timeout: Job exceeded ${timeoutMs}ms`);
+
+        const timeoutPromise = new Promise<never>((_, reject) => {
+            timeoutTimer = setTimeout(() => {
+                // Settle the attempt as timed out before notifying cooperative work.
+                reject(timeoutError);
+                controller.abort(timeoutError);
+            }, timeoutMs);
+        });
+
+        try {
+            await Promise.race([
+                handler(job, { signal: controller.signal }),
+                timeoutPromise,
+            ]);
+        } finally {
+            if (timeoutTimer) clearTimeout(timeoutTimer);
         }
     }
 }

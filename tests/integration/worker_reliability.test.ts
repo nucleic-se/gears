@@ -5,7 +5,7 @@ import { fileURLToPath } from 'url';
 import { SQLiteQueue } from '../../src/core/queue/SQLiteQueue.js';
 import { Worker } from '../../src/core/queue/Worker.js';
 import { Container } from '../../src/core/container/Container.js';
-import { Job } from '../../src/core/queue/interfaces.js';
+import { Job, JobExecutionContext } from '../../src/core/queue/interfaces.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DB_PATH = path.resolve(__dirname, '../../test-reliability.sqlite');
@@ -122,5 +122,40 @@ describe('Worker Reliability', () => {
         expect(failedJob.status).toBe('failed');
         expect(failedJob.attempts).toBe(2);
         expect(failedJob.error).toBe('Fatal error');
+    });
+
+    it('aborts cooperative handler work after an execution timeout', async () => {
+        const handlers = new Map();
+        let observedAbort = false;
+        let lateSideEffect = false;
+
+        handlers.set('cooperative_timeout', async (_job: Job, context?: JobExecutionContext) => {
+            await new Promise<void>((resolve) => {
+                const sideEffectTimer = setTimeout(() => {
+                    lateSideEffect = true;
+                    resolve();
+                }, 100);
+
+                context?.signal.addEventListener('abort', () => {
+                    observedAbort = true;
+                    clearTimeout(sideEffectTimer);
+                    resolve();
+                }, { once: true });
+            });
+        });
+        container.bind('JobHandlers', () => handlers);
+
+        worker = new Worker(queue, container, { pollInterval: 5 });
+        worker.start();
+        const job = await queue.add('cooperative_timeout', {}, {
+            executionTimeoutMs: 20,
+            maxRetries: 0,
+        });
+
+        await new Promise(r => setTimeout(r, 150));
+
+        expect((await queue.get(job.id))?.status).toBe('failed');
+        expect(observedAbort).toBe(true);
+        expect(lateSideEffect).toBe(false);
     });
 });

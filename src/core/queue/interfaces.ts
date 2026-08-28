@@ -25,7 +25,12 @@ export interface Job<T = any> {
     claimToken?: string | null;
 }
 
-export type JobHandler<T = any> = (job: Job<T>) => Promise<void>;
+export interface JobExecutionContext {
+    /** Aborted when the Worker stops waiting for this processing attempt. */
+    signal: AbortSignal;
+}
+
+export type JobHandler<T = any> = (job: Job<T>, context?: JobExecutionContext) => Promise<void>;
 
 export interface IQueue {
     add(type: string, payload: any, options?: JobOptions): Promise<Job>;
