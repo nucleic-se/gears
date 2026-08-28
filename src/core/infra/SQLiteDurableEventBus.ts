@@ -126,11 +126,10 @@ export class SQLiteDurableEventBus implements IDurableEventBus {
 
             const safe = [...handlers];
             for (const handler of safe) {
-                try {
-                    handler(payload);
-                } catch {
-                    // Swallow — same fire-and-forget semantics as EventBus
-                }
+                // Observe both synchronous throws and asynchronous rejections.
+                void Promise.resolve()
+                    .then(() => handler(payload))
+                    .catch(() => { /* Same fire-and-forget semantics as EventBus. */ });
             }
         }
 
