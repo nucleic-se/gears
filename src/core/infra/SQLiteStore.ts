@@ -125,28 +125,21 @@ export class SQLiteStore implements IStore {
 
     async scan<T = any>(prefix?: string): Promise<Record<string, T>> {
         const now = Date.now();
-        // Calculate the effective prefix for the DB query
-        // If this store is namespaced 'ns', and we scan 'p', we look for 'ns:p%'
-        // If this store is root, and we scan 'p', we look for 'p%'
-
-        let searchPrefix = this.prefix;
-        if (prefix) {
-            searchPrefix = searchPrefix ? `${searchPrefix}:${prefix}` : prefix;
-        }
-
-        // Prepare SQL pattern (searchPrefix%)
-        const pattern = searchPrefix ? `${searchPrefix}%` : '%';
-
-        const stmt = this.db.prepare(`
-            SELECT key, value, expires_at 
-            FROM store 
-            WHERE key LIKE ?
-        `);
-
-        const rows = stmt.all(pattern) as { key: string; value: string; expires_at: number | null }[];
+        const scopePrefix = this.prefix ? `${this.prefix}:` : '';
+        const filterPrefix = prefix ? `${scopePrefix}${prefix}` : scopePrefix;
+        const rows = filterPrefix
+            ? this.db.prepare(`
+                SELECT key, value, expires_at
+                FROM store
+                WHERE substr(key, 1, length(?)) = ?
+            `).all(filterPrefix, filterPrefix)
+            : this.db.prepare(`
+                SELECT key, value, expires_at
+                FROM store
+            `).all();
         const result: Record<string, T> = {};
 
-        for (const row of rows) {
+        for (const row of rows as { key: string; value: string; expires_at: number | null }[]) {
             // Lazy expiration check
             if (row.expires_at && row.expires_at < now) {
                 // Don't modify DB during scan for speed, just omit from result
@@ -158,23 +151,7 @@ export class SQLiteStore implements IStore {
             // e.g. internal 'ns:key', user sees 'key'
             let userKey = row.key;
             if (this.prefix) {
-                if (userKey.startsWith(this.prefix + ':')) {
-                    userKey = userKey.substring(this.prefix.length + 1);
-                } else if (userKey === this.prefix) {
-                    // Exact match on namespace itself? unlikely given our key schema, but theoretically possible
-                    userKey = '';
-                }
-            }
-
-            // If user asked for scan('p'), we might want to strip 'p:' too?
-            // Usually scan returns keys relative to the scan root (namespace), 
-            // but the prefix argument is a filter. 
-            // Standard convention: return keys relative to the namespace.
-            // If I verify `namespace('a').scan('b')`, I expect keys starting with 'b...'.
-
-            // Filter by prefix strictly (LIKE is case insensitive by default in some config, but good to check)
-            if (prefix && !userKey.startsWith(prefix)) {
-                continue;
+                userKey = userKey.substring(scopePrefix.length);
             }
 
             try {

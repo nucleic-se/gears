@@ -51,4 +51,24 @@ describe('SQLiteStore', () => {
         const val2 = await store.get('corrupt');
         expect(val2).toBeNull();
     });
+
+    it('isolates scans at namespace boundaries', async () => {
+        await store.namespace('a').set('inside', 1);
+        await store.namespace('ab').set('outside', 2);
+
+        expect(await store.namespace('a').scan()).toEqual({ inside: 1 });
+    });
+
+    it('treats scan prefixes as literal text', async () => {
+        const namespaced = store.namespace('tenant%_');
+        await namespaced.set('key%_', 'inside');
+        await store.namespace('tenantXX').set('keyZZ', 'outside namespace');
+        await namespaced.set('keyZZ', 'outside filter');
+
+        expect(await namespaced.scan()).toEqual({
+            'key%_': 'inside',
+            keyZZ: 'outside filter',
+        });
+        expect(await namespaced.scan('key%_')).toEqual({ 'key%_': 'inside' });
+    });
 });
