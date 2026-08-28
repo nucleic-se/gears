@@ -179,7 +179,7 @@ export class Worker {
     private async process(job: Job) {
         if (!this.running) {
             try {
-                await this.queue.release(job.id);
+                await this.queue.release(job.id, job.claimToken ?? undefined);
             } catch (e) {
                 // Ignore
             }
@@ -208,7 +208,7 @@ export class Worker {
         if (heartbeatIntervalMs > 0) {
             heartbeatTimer = setInterval(async () => {
                 try {
-                    await this.queue.heartbeat(job.id);
+                    await this.queue.heartbeat(job.id, job.claimToken ?? undefined);
                 } catch (e) {
                     const message = e instanceof Error ? e.message : String(e);
                     this.logger.warn(`Heartbeat failed`, { jobId: job.id, error: message });
@@ -248,7 +248,7 @@ export class Worker {
             }
 
             try {
-                await this.queue.complete(job.id);
+                await this.queue.complete(job.id, job.claimToken ?? undefined);
                 const duration = Date.now() - startTime;
                 this.logger.debug(`Job completed`, { jobId: job.id, durationMs: duration });
                 this.metrics?.increment('job.completed', 1, { type: job.type });
@@ -277,7 +277,7 @@ export class Worker {
                 });
                 this.metrics?.increment('job.retried', 1, { type: job.type });
                 try {
-                    await this.queue.retry(job.id, delay, msg);
+                    await this.queue.retry(job.id, delay, msg, job.claimToken ?? undefined);
                 } catch (e) {
                     const message = e instanceof Error ? e.message : String(e);
                     this.logger.error(`Failed to retry job`, { jobId: job.id, error: message });
@@ -294,7 +294,7 @@ export class Worker {
                 });
                 this.metrics?.increment('job.failed', 1, { type: job.type });
                 try {
-                    await this.queue.fail(job.id, msg);
+                    await this.queue.fail(job.id, msg, job.claimToken ?? undefined);
                 } catch (e) {
                     const message = e instanceof Error ? e.message : String(e);
                     this.logger.error(`Failed to mark job failed`, { jobId: job.id, error: message });

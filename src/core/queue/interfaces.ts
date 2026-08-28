@@ -21,6 +21,8 @@ export interface Job<T = any> {
     scheduled_at?: number;
     priority: number;
     error?: string | null;
+    /** Opaque ownership token for the current processing attempt. */
+    claimToken?: string | null;
 }
 
 export type JobHandler<T = any> = (job: Job<T>) => Promise<void>;
@@ -45,10 +47,14 @@ export interface IQueue {
     retryFailed(jobId: string): Promise<boolean>;
     retryAll(type?: string): Promise<number>;
     pop(): Promise<Job | null>;
-    complete(jobId: string): Promise<void>;
-    fail(jobId: string, error: string): Promise<void>;
-    retry(jobId: string, delayMs: number, lastError?: string): Promise<void>;
-    heartbeat(jobId: string): Promise<void>;
+    /**
+     * A claim token fences transitions to the processing attempt that popped the job.
+     * Omitting it preserves administrative/legacy force-transition behavior.
+     */
+    complete(jobId: string, claimToken?: string): Promise<void>;
+    fail(jobId: string, error: string, claimToken?: string): Promise<void>;
+    retry(jobId: string, delayMs: number, lastError?: string, claimToken?: string): Promise<void>;
+    heartbeat(jobId: string, claimToken?: string): Promise<void>;
     recover(timeoutMs: number): Promise<number>;
     stats(): Promise<{
         overview: Record<string, number>;
@@ -56,7 +62,7 @@ export interface IQueue {
     }>;
     clear(status: Job['status'], type?: string): Promise<number>;
     close(): Promise<void>;
-    release(jobId: string): Promise<void>;
+    release(jobId: string, claimToken?: string): Promise<void>;
 }
 
 export interface ValidationSchema<T = unknown> {

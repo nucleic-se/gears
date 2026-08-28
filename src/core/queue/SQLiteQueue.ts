@@ -80,6 +80,15 @@ export class SQLiteQueue implements IQueue {
                 // ON CONFLICT(name) in INSERT upserts requires a non-partial unique index.
                 db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_name ON jobs(name)');
             },
+            // Version 4: Processing-attempt ownership
+            (db: Database.Database) => {
+                const columns = db.pragma('table_info(jobs)') as Array<{ name: string }>;
+                if (!columns.some(({ name }) => name === 'claim_token')) {
+                    db.exec('ALTER TABLE jobs ADD COLUMN claim_token TEXT');
+                }
+                // Terminal and queued rows have no live processing owner.
+                db.exec("UPDATE jobs SET claim_token = NULL WHERE status != 'processing'");
+            },
         ];
 
         // 4. Run Migrations
@@ -121,6 +130,7 @@ export class SQLiteQueue implements IQueue {
             payload,
             options,
             attempts: row.attempts ?? 0,
+            claimToken: row.claim_token ?? null,
             // Critical fix: Parse error MUST take precedence over existing row error
             // Otherwise a job with row.error="foo" but corrupted payload will bypass poison checks
             error: parseError ?? row.error ?? null
@@ -249,6 +259,10 @@ export class SQLiteQueue implements IQueue {
                 error            = CASE
                     WHEN jobs.status IN ('failed', 'completed') THEN NULL
                     ELSE jobs.error
+                END,
+                claim_token      = CASE
+                    WHEN jobs.status IN ('failed', 'completed') THEN NULL
+                    ELSE jobs.claim_token
                 END
             WHERE jobs.status IN ('pending', 'failed', 'completed')
         `).run(id, name, type, JSON.stringify(payload), now, now, scheduled_at, JSON.stringify(options), stuckTimeoutMs, priority, expiresAt);
@@ -292,7 +306,7 @@ export class SQLiteQueue implements IQueue {
         const now = Date.now();
         const result = this.db.prepare(`
             UPDATE jobs
-            SET status = 'pending', updated_at = ?, scheduled_at = ?, error = NULL
+            SET status = 'pending', updated_at = ?, scheduled_at = ?, error = NULL, claim_token = NULL
             WHERE id = ? AND status = 'failed'
         `).run(now, now, jobId);
         return result.changes > 0;
@@ -303,29 +317,31 @@ export class SQLiteQueue implements IQueue {
         const result = type
             ? this.db.prepare(`
                 UPDATE jobs
-                SET status = 'pending', updated_at = ?, scheduled_at = ?, error = NULL
+                SET status = 'pending', updated_at = ?, scheduled_at = ?, error = NULL, claim_token = NULL
                 WHERE status = 'failed' AND type = ?
             `).run(now, now, type)
             : this.db.prepare(`
                 UPDATE jobs
-                SET status = 'pending', updated_at = ?, scheduled_at = ?, error = NULL
+                SET status = 'pending', updated_at = ?, scheduled_at = ?, error = NULL, claim_token = NULL
                 WHERE status = 'failed'
             `).run(now, now);
         return result.changes;
     }
 
-    async retry(jobId: string, delayMs: number, lastError?: string): Promise<void> {
+    async retry(jobId: string, delayMs: number, lastError?: string, claimToken?: string): Promise<void> {
         const stmt = this.db.prepare(`
             UPDATE jobs 
             SET status = 'pending', 
                 updated_at = ?,
                 scheduled_at = ?, 
                 attempts = COALESCE(attempts, 0) + 1,
-                error = ?
+                error = ?,
+                claim_token = NULL
             WHERE id = ? AND status = 'processing'
+              AND (? IS NULL OR claim_token = ?)
         `);
         const now = Date.now();
-        stmt.run(now, now + delayMs, lastError || null, jobId);
+        stmt.run(now, now + delayMs, lastError || null, jobId, claimToken ?? null, claimToken ?? null);
     }
 
     async pop(): Promise<Job | null> {
@@ -370,7 +386,7 @@ export class SQLiteQueue implements IQueue {
                     // Mark as failed permanently, do NOT increment attempts
                     const failStmt = this.db.prepare(`
                         UPDATE jobs 
-                        SET status = 'failed', updated_at = ?, error = ? 
+                        SET status = 'failed', updated_at = ?, error = ?, claim_token = NULL
                         WHERE id = ?
                     `);
                     failStmt.run(now, job.error, job.id);
@@ -383,7 +399,7 @@ export class SQLiteQueue implements IQueue {
                 if (jobRecord.expires_at && now > jobRecord.expires_at) {
                     const failStmt = this.db.prepare(`
                         UPDATE jobs
-                        SET status = 'failed', updated_at = ?, error = ?
+                        SET status = 'failed', updated_at = ?, error = ?, claim_token = NULL
                         WHERE id = ?
                     `);
                     failStmt.run(now, 'Job expired (TTL exceeded)', job.id);
@@ -393,17 +409,19 @@ export class SQLiteQueue implements IQueue {
                 // 4. Valid job found, lock it
                 const updateStmt = this.db.prepare(`
                 UPDATE jobs 
-                SET status = 'processing', updated_at = ? 
-                WHERE id = ?
+                SET status = 'processing', updated_at = ?, claim_token = ?
+                WHERE id = ? AND status = 'pending'
             `);
 
                 const processingTimestamp = Date.now();
-                updateStmt.run(processingTimestamp, jobRecord.id);
+                const claimToken = randomUUID();
+                updateStmt.run(processingTimestamp, claimToken, jobRecord.id);
 
                 return {
                     ...job,
                     status: 'processing' as const,
-                    updated_at: processingTimestamp
+                    updated_at: processingTimestamp,
+                    claimToken,
                 };
             }
 
@@ -420,42 +438,46 @@ export class SQLiteQueue implements IQueue {
         }
     }
 
-    async release(jobId: string): Promise<void> {
+    async release(jobId: string, claimToken?: string): Promise<void> {
         // Return a processing job to pending immediately (no backoff, no attempt increment)
         // Used for clean shutdown of popped-but-not-started jobs
         const stmt = this.db.prepare(`
             UPDATE jobs 
-            SET status = 'pending', updated_at = ? 
+            SET status = 'pending', updated_at = ?, claim_token = NULL
             WHERE id = ? AND status = 'processing'
+              AND (? IS NULL OR claim_token = ?)
         `);
-        stmt.run(Date.now(), jobId);
+        stmt.run(Date.now(), jobId, claimToken ?? null, claimToken ?? null);
     }
 
-    async complete(jobId: string): Promise<void> {
+    async complete(jobId: string, claimToken?: string): Promise<void> {
         const stmt = this.db.prepare(`
       UPDATE jobs 
-      SET status = 'completed', updated_at = ? 
+      SET status = 'completed', updated_at = ?, claim_token = NULL
       WHERE id = ? AND status = 'processing'
+        AND (? IS NULL OR claim_token = ?)
     `);
-        stmt.run(Date.now(), jobId);
+        stmt.run(Date.now(), jobId, claimToken ?? null, claimToken ?? null);
     }
 
-    async fail(jobId: string, error: string): Promise<void> {
+    async fail(jobId: string, error: string, claimToken?: string): Promise<void> {
         const stmt = this.db.prepare(`
         UPDATE jobs 
-        SET status = 'failed', updated_at = ?, error = ?
+        SET status = 'failed', updated_at = ?, error = ?, claim_token = NULL
         WHERE id = ? AND status = 'processing'
+          AND (? IS NULL OR claim_token = ?)
         `);
-        stmt.run(Date.now(), error, jobId);
+        stmt.run(Date.now(), error, jobId, claimToken ?? null, claimToken ?? null);
     }
 
-    async heartbeat(jobId: string): Promise<void> {
+    async heartbeat(jobId: string, claimToken?: string): Promise<void> {
         const stmt = this.db.prepare(`
         UPDATE jobs
         SET updated_at = ?
         WHERE id = ? AND status = 'processing'
+          AND (? IS NULL OR claim_token = ?)
         `);
-        stmt.run(Date.now(), jobId);
+        stmt.run(Date.now(), jobId, claimToken ?? null, claimToken ?? null);
     }
 
     async recover(timeoutMs: number): Promise<number> {
@@ -464,7 +486,7 @@ export class SQLiteQueue implements IQueue {
         // First, fail any expired processing jobs instead of requeueing them
         const failExpired = this.db.prepare(`
             UPDATE jobs
-            SET status = 'failed', updated_at = ?, error = 'Job expired (TTL exceeded)'
+            SET status = 'failed', updated_at = ?, error = 'Job expired (TTL exceeded)', claim_token = NULL
             WHERE status = 'processing'
               AND expires_at IS NOT NULL
               AND expires_at < ?
@@ -474,7 +496,7 @@ export class SQLiteQueue implements IQueue {
         // Also fail expired pending jobs while we're here
         const failExpiredPending = this.db.prepare(`
             UPDATE jobs
-            SET status = 'failed', updated_at = ?, error = 'Job expired (TTL exceeded)'
+            SET status = 'failed', updated_at = ?, error = 'Job expired (TTL exceeded)', claim_token = NULL
             WHERE status = 'pending'
               AND expires_at IS NOT NULL
               AND expires_at < ?
@@ -484,7 +506,7 @@ export class SQLiteQueue implements IQueue {
         // Then requeue non-expired stuck jobs as before
         const stmt = this.db.prepare(`
             UPDATE jobs
-            SET status = 'pending', updated_at = ?
+            SET status = 'pending', updated_at = ?, claim_token = NULL
             WHERE status = 'processing'
               AND updated_at < (? - COALESCE(stuck_timeout_ms, ?))
         `);

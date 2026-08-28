@@ -73,6 +73,62 @@ describe('Queue Recovery', () => {
         dbHack.close();
     });
 
+    it('rejects a stale claim after recovery and a newer pop', async () => {
+        const added = await queue.add('claim-probe', { version: 1 });
+        const firstClaim = await queue.pop();
+
+        if (!firstClaim?.claimToken) throw new Error('first claim token missing');
+        expect(firstClaim.id).toBe(added.id);
+        expect(firstClaim.claimToken).toEqual(expect.any(String));
+
+        const Database = (await import('better-sqlite3')).default;
+        const db = new Database(TEST_DB_PATH);
+        db.prepare('UPDATE jobs SET updated_at = 0 WHERE id = ?').run(firstClaim.id);
+        db.close();
+
+        expect(await queue.recover(1)).toBe(1);
+        const secondClaim = await queue.pop();
+
+        if (!secondClaim?.claimToken) throw new Error('second claim token missing');
+        expect(secondClaim.claimToken).toEqual(expect.any(String));
+        expect(secondClaim.claimToken).not.toBe(firstClaim.claimToken);
+
+        const beforeStaleHeartbeat = (await queue.get(secondClaim.id))?.updated_at;
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        await queue.heartbeat(secondClaim.id, firstClaim.claimToken);
+        expect((await queue.get(secondClaim.id))?.updated_at).toBe(beforeStaleHeartbeat);
+
+        await queue.retry(secondClaim.id, 0, 'stale retry', firstClaim.claimToken);
+        expect((await queue.get(secondClaim.id))?.status).toBe('processing');
+        await queue.fail(secondClaim.id, 'stale failure', firstClaim.claimToken);
+        expect((await queue.get(secondClaim.id))?.status).toBe('processing');
+        await queue.release(secondClaim.id, firstClaim.claimToken);
+        expect((await queue.get(secondClaim.id))?.status).toBe('processing');
+        await queue.complete(secondClaim.id, firstClaim.claimToken);
+        expect((await queue.get(secondClaim.id))?.status).toBe('processing');
+
+        await queue.complete(secondClaim.id, secondClaim.claimToken);
+        expect((await queue.get(secondClaim.id))?.status).toBe('completed');
+    });
+
+    it('migrates a version 3 queue schema with a nullable claim token', async () => {
+        await queue.close();
+        const Database = (await import('better-sqlite3')).default;
+        const db = new Database(TEST_DB_PATH);
+        db.exec('ALTER TABLE jobs DROP COLUMN claim_token');
+        db.prepare('UPDATE _schema_version SET version = 3').run();
+        db.close();
+
+        queue = new SQLiteQueue(TEST_DB_PATH);
+        const migrated = new Database(TEST_DB_PATH);
+        const version = migrated.prepare('SELECT version FROM _schema_version').pluck().get();
+        const columns = migrated.prepare('PRAGMA table_info(jobs)').all() as Array<{ name: string }>;
+
+        expect(version).toBe(4);
+        expect(columns.map(({ name }) => name)).toContain('claim_token');
+        migrated.close();
+    });
+
     it('bump: creates a new named delayed job', async () => {
         await queue.bump('flush:chat-1', 'memory.flush', { chatId: 'chat-1' }, 5000);
         const jobs = await queue.list('pending');
