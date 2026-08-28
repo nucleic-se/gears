@@ -226,10 +226,31 @@ export class SQLiteQueue implements IQueue {
             INSERT INTO jobs (id, name, type, payload, status, created_at, updated_at, scheduled_at, attempts, options, stuck_timeout_ms, priority, expires_at)
             VALUES (?, ?, ?, ?, 'pending', ?, ?, ?, 0, ?, ?, ?, ?)
             ON CONFLICT(name) DO UPDATE SET
+                type         = excluded.type,
                 scheduled_at = excluded.scheduled_at,
                 updated_at   = excluded.updated_at,
-                payload      = excluded.payload
-            WHERE jobs.status = 'pending'
+                payload      = excluded.payload,
+                status       = CASE
+                    WHEN jobs.status IN ('failed', 'completed') THEN 'pending'
+                    ELSE jobs.status
+                END,
+                created_at   = CASE
+                    WHEN jobs.status IN ('failed', 'completed') THEN excluded.created_at
+                    ELSE jobs.created_at
+                END,
+                attempts     = CASE
+                    WHEN jobs.status IN ('failed', 'completed') THEN 0
+                    ELSE jobs.attempts
+                END,
+                options          = excluded.options,
+                stuck_timeout_ms = excluded.stuck_timeout_ms,
+                priority         = excluded.priority,
+                expires_at       = excluded.expires_at,
+                error            = CASE
+                    WHEN jobs.status IN ('failed', 'completed') THEN NULL
+                    ELSE jobs.error
+                END
+            WHERE jobs.status IN ('pending', 'failed', 'completed')
         `).run(id, name, type, JSON.stringify(payload), now, now, scheduled_at, JSON.stringify(options), stuckTimeoutMs, priority, expiresAt);
     }
 

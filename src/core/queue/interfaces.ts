@@ -30,8 +30,9 @@ export interface IQueue {
     addDelayed(type: string, payload: any, delayMs: number, options?: JobOptions): Promise<Job>;
     /**
      * Upsert a named delayed job — create it if it doesn't exist, or push its
-     * fire time to `now + delayMs` if it does. Only bumps pending jobs; a job
-     * already processing is left untouched.
+     * fire time to `now + delayMs` if it does. Pending jobs are rescheduled,
+     * terminal jobs are reactivated, and a job already processing is left
+     * untouched.
      *
      * Useful for debounced background work (e.g. flush after inactivity):
      * call `bump(name, ...)` on every relevant event and the job fires once,

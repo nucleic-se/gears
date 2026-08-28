@@ -103,4 +103,35 @@ describe('Queue Recovery', () => {
         const processing = await queue.list('processing');
         expect(processing).toHaveLength(1); // still processing, not cancelled
     });
+
+    it.each(['failed', 'completed'] as const)('bump: reactivates a %s named job', async (terminalStatus) => {
+        await queue.bump('flush:chat-1', 'memory.flush', { version: 1 }, 0, {
+            maxRetries: 3,
+            priority: 1,
+        });
+        const original = await queue.pop();
+        expect(original).toBeDefined();
+
+        if (terminalStatus === 'failed') await queue.fail(original!.id, 'previous failure');
+        else await queue.complete(original!.id);
+
+        await queue.bump('flush:chat-1', 'memory.flush.v2', { version: 2 }, 5000, {
+            maxRetries: 0,
+            priority: 7,
+        });
+
+        const pending = await queue.list('pending');
+        expect(pending).toHaveLength(1);
+        expect(pending[0]).toMatchObject({
+            id: original!.id,
+            type: 'memory.flush.v2',
+            payload: { version: 2 },
+            status: 'pending',
+            attempts: 0,
+            priority: 7,
+            error: null,
+            options: { maxRetries: 0, priority: 7 },
+        });
+        expect(pending[0].scheduled_at).toBeGreaterThan(Date.now());
+    });
 });
