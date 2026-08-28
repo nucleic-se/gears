@@ -30,7 +30,7 @@ describe('Container', () => {
         expect(disposeLog).toEqual(['C', 'B', 'A']);
     });
 
-    it('should not dispose unbound services (memory leak fix)', async () => {
+    it('disposes a resolved singleton when it is replaced', async () => {
         const disposeLog: string[] = [];
         const container = new Container();
 
@@ -44,16 +44,52 @@ describe('Container', () => {
         // Resolve it so it gets added to shutdownStack
         container.make('Test' as any);
 
-        // Rebind -> Should remove 'Original' from shutdownStack
+        // Rebinding transfers ownership away from the original instance.
         container.singleton('Test' as any, () => new DisposableService('Replacement'));
+        expect(disposeLog).toEqual(['Original']);
 
         // Resolve replacement
         container.make('Test' as any);
 
         await container.shutdown();
 
-        // Should ONLY dispose 'Replacement', NOT 'Original'
-        expect(disposeLog).toEqual(['Replacement']);
+        expect(disposeLog).toEqual(['Original', 'Replacement']);
+    });
+
+    it('awaits asynchronous singleton disposal when unbinding', async () => {
+        const disposeLog: string[] = [];
+        const container = new Container();
+
+        container.singleton('Test' as any, () => ({
+            async dispose() {
+                disposeLog.push('started');
+                await new Promise(resolve => setTimeout(resolve, 10));
+                disposeLog.push('finished');
+            },
+        }));
+        container.make('Test' as any);
+
+        await container.unbind('Test');
+
+        expect(disposeLog).toEqual(['started', 'finished']);
+        await container.shutdown();
+        expect(disposeLog).toEqual(['started', 'finished']);
+    });
+
+    it('disposes a shared singleton instance after its last key is unbound', async () => {
+        let disposals = 0;
+        const container = new Container();
+        const shared = { dispose() { disposals++; } };
+
+        container.singleton('First' as any, () => shared);
+        container.singleton('Second' as any, () => shared);
+        container.make('First' as any);
+        container.make('Second' as any);
+
+        await container.unbind('First');
+        expect(disposals).toBe(0);
+        await container.unbind('Second');
+        expect(disposals).toBe(1);
     });
 
     it('should replace singleton instance when re-registered', () => {

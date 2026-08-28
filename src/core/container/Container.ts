@@ -7,39 +7,63 @@ export class Container {
     private singletons = new Map<string | symbol, any>();
     private singletonFactories = new Map<string | symbol, Factory<any>>();
     private resolvingSet = new Set<string | symbol>();
+    private pendingDisposals = new Set<Promise<void>>();
 
     /**
      * Register a binding (factory created every time)
      */
     bind<K extends ServiceKey>(key: K, factory: Factory<ServiceMap[K]>): void {
-        this.bindings.set(key, factory);
-        this.singletons.delete(key);
         this.singletonFactories.delete(key);
+        void this.releaseSingleton(key);
+        this.bindings.set(key, factory);
     }
 
     /**
      * Register a singleton (created once)
      */
     singleton<K extends ServiceKey>(key: K, factory: Factory<ServiceMap[K]>): void {
-        this.removeShutdownInstance(key);
-        this.singletonFactories.set(key, factory);
         this.bindings.delete(key);
-        this.singletons.delete(key); // Fix: Clear existing instance if any
-    }
-
-    unbind(key: string | symbol): void {
-        this.removeShutdownInstance(key);
-        this.bindings.delete(key);
-        this.singletons.delete(key);
         this.singletonFactories.delete(key);
+        void this.releaseSingleton(key);
+        this.singletonFactories.set(key, factory);
     }
 
-    private removeShutdownInstance(key: string | symbol) {
-        if (this.singletons.has(key)) {
-            const instance = this.singletons.get(key);
-            if (instance) {
-                this.shutdownStack = this.shutdownStack.filter(i => i !== instance);
-            }
+    async unbind(key: string | symbol): Promise<void> {
+        this.bindings.delete(key);
+        this.singletonFactories.delete(key);
+        const disposal = this.releaseSingleton(key);
+        await disposal;
+    }
+
+    private releaseSingleton(key: string | symbol): Promise<void> {
+        if (!this.singletons.has(key)) return Promise.resolve();
+
+        const instance = this.singletons.get(key);
+        this.singletons.delete(key);
+
+        // A shared instance remains owned until its last singleton key is removed.
+        if (!instance || [...this.singletons.values()].includes(instance)) {
+            return Promise.resolve();
+        }
+
+        this.shutdownStack = this.shutdownStack.filter(item => item !== instance);
+        const disposal = this.disposeInstance(instance);
+        this.pendingDisposals.add(disposal);
+        void disposal.finally(() => this.pendingDisposals.delete(disposal));
+        return disposal;
+    }
+
+    private async disposeInstance(instance: any): Promise<void> {
+        const disposeFn = instance?.dispose || instance?.close;
+        if (typeof disposeFn !== 'function') return;
+
+        try {
+            await disposeFn.call(instance);
+        } catch (error) {
+            const message = `[Container] Failed to dispose service`;
+            const logger = this.singletons.get('ILogger');
+            if (logger && logger !== instance) logger.error(message, error);
+            else console.error(message, error);
         }
     }
 
@@ -120,31 +144,11 @@ export class Container {
      * Iterates through all instantiated singletons in REVERSE resolution order (LIFO).
      */
     async shutdown(): Promise<void> {
-        const logger = this.makeOrNull<any>('ILogger');
+        await Promise.allSettled([...this.pendingDisposals]);
         const reversed = [...this.shutdownStack].reverse(); // LIFO
 
         for (const instance of reversed) {
-            // Check for .dispose() or .close() (generic convention)
-            const disposeFn = instance.dispose || instance.close;
-
-            if (typeof disposeFn === 'function') {
-                try {
-                    const result = disposeFn.call(instance);
-                    if (result instanceof Promise) {
-                        try {
-                            await result; // Sequential wait to ensure strict ordering
-                        } catch (e: any) {
-                            const msg = `[Container] Failed to dispose service`;
-                            if (logger) logger.error(msg, e);
-                            else console.error(msg, e);
-                        }
-                    }
-                } catch (e) {
-                    const msg = `[Container] Failed to dispose service`;
-                    if (logger) logger.error(msg, e);
-                    else console.error(msg, e);
-                }
-            }
+            await this.disposeInstance(instance); // Sequential wait preserves strict LIFO ordering.
         }
 
         this.shutdownStack = [];

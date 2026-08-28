@@ -234,7 +234,7 @@ export class BundleManager {
         // Unbind all services this bundle's providers registered
         const keys = this.bundleServiceKeys.get(bundleName);
         if (keys) {
-            for (const key of keys) this.app.unbind(key);
+            for (const key of keys) await this.app.unbind(key);
             this.bundleServiceKeys.delete(bundleName);
         }
 
