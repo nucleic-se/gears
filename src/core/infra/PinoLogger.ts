@@ -8,8 +8,16 @@ export interface PinoLoggerOptions {
     debug?: boolean; // Enable debug level
 }
 
+type OwnedLogStream = pino.DestinationStream & NodeJS.EventEmitter & {
+    end(): void;
+    destroyed?: boolean;
+    closed?: boolean;
+};
+
 export class PinoLogger implements ILogger {
     private logger: pino.Logger;
+    private readonly ownedStreams: OwnedLogStream[] = [];
+    private disposal: Promise<void> | undefined;
 
     constructor(options: PinoLoggerOptions = {}) {
         // Resolve mode from options
@@ -21,25 +29,33 @@ export class PinoLogger implements ILogger {
         // Only 'text' mode writes to stderr. output=json, silent, tui all suppress console logs.
         if (mode === 'text') {
             const usePretty = process.env.NODE_ENV !== 'production';
+            let consoleStream: pino.DestinationStream;
+            if (usePretty) {
+                const transport = pino.transport({
+                    target: 'pino-pretty',
+                    options: {
+                        colorize: true,
+                        translateTime: 'SYS:HH:MM:ss',
+                        ignore: 'pid,hostname',
+                        destination: 2 // 1 = stdout, 2 = stderr
+                    }
+                });
+                this.ownedStreams.push(transport);
+                consoleStream = transport;
+            } else {
+                consoleStream = process.stderr;
+            }
             streams.push(
-                usePretty ? {
-                    stream: pino.transport({
-                        target: 'pino-pretty',
-                        options: {
-                            colorize: true,
-                            translateTime: 'SYS:HH:MM:ss',
-                            ignore: 'pid,hostname',
-                            destination: 2 // 1 = stdout, 2 = stderr
-                        }
-                    })
-                } : { stream: process.stderr }
+                { stream: consoleStream }
             );
         }
 
         // File stream (Always) - ensure data dir exists
         try {
             const dataDir = ensureDataDir();
-            streams.push({ stream: pino.destination(path.join(dataDir, 'app.log')) });
+            const fileStream = pino.destination(path.join(dataDir, 'app.log'));
+            this.ownedStreams.push(fileStream);
+            streams.push({ stream: fileStream });
         } catch (e) {
             // If we can't write to file (e.g. read-only fs), we just don't add the stream
             // But if mode != text, we might have NO streams. That's fine (silent).
@@ -85,5 +101,32 @@ export class PinoLogger implements ILogger {
                 this.logger.error(context, message);
             }
         }
+    }
+
+    dispose(): Promise<void> {
+        this.disposal ??= this.closeOwnedStreams();
+        return this.disposal;
+    }
+
+    private async closeOwnedStreams(): Promise<void> {
+        await new Promise<void>((resolve, reject) => {
+            this.logger.flush(error => error ? reject(error) : resolve());
+        });
+        await Promise.all(this.ownedStreams.map(stream => new Promise<void>((resolve, reject) => {
+            if (stream.destroyed || ('closed' in stream && stream.closed)) {
+                resolve();
+                return;
+            }
+            const settled = (error?: Error) => {
+                stream.removeListener('close', closed);
+                stream.removeListener('error', failed);
+                error ? reject(error) : resolve();
+            };
+            const closed = () => settled();
+            const failed = (error: Error) => settled(error);
+            stream.once('close', closed);
+            stream.once('error', failed);
+            stream.end();
+        })));
     }
 }
