@@ -85,6 +85,14 @@ export class SQLiteQueue implements IQueue {
                 // Terminal and queued rows have no live processing owner.
                 db.exec("UPDATE jobs SET claim_token = NULL WHERE status != 'processing'");
             },
+            // Version 5: Durable keyed concurrency
+            (db: Database.Database) => {
+                this.addColumnIfMissing(db, 'jobs', 'concurrency_key', 'TEXT');
+                db.exec(`
+                    CREATE INDEX IF NOT EXISTS idx_jobs_processing_concurrency
+                    ON jobs(status, concurrency_key)
+                `);
+            },
         ];
 
         if (!Number.isInteger(currentVersion) || currentVersion < 0) {
@@ -170,16 +178,18 @@ export class SQLiteQueue implements IQueue {
             }
         }
 
+        const concurrencyKey = this.concurrency(options);
         const stmt = this.db.prepare(`
-      INSERT INTO jobs (id, type, payload, status, created_at, updated_at, scheduled_at, attempts, options, stuck_timeout_ms, priority, expires_at)
-      VALUES (?, ?, ?, 'pending', ?, ?, ?, 0, ?, ?, ?, ?)
+      INSERT INTO jobs (id, type, payload, status, created_at, updated_at, scheduled_at, attempts, options, stuck_timeout_ms, priority, expires_at, concurrency_key)
+      VALUES (?, ?, ?, 'pending', ?, ?, ?, 0, ?, ?, ?, ?, ?)
     `);
         const now = Date.now();
         const stuckTimeoutMs = options.stuckTimeoutMs ?? null;
         const priority = options.priority ?? 0;
         const expiresAt = options.ttlMs ? now + options.ttlMs : null;
         const id = randomUUID();
-        stmt.run(id, type, JSON.stringify(payload), now, now, now, JSON.stringify(options), stuckTimeoutMs, priority, expiresAt);
+        stmt.run(id, type, JSON.stringify(payload), now, now, now, JSON.stringify(options), stuckTimeoutMs, priority,
+            expiresAt, concurrencyKey);
 
         return {
             id,
@@ -211,9 +221,10 @@ export class SQLiteQueue implements IQueue {
             }
         }
 
+        const concurrencyKey = this.concurrency(options);
         const stmt = this.db.prepare(`
-      INSERT INTO jobs (id, type, payload, status, created_at, updated_at, scheduled_at, attempts, options, stuck_timeout_ms, priority, expires_at)
-      VALUES (?, ?, ?, 'pending', ?, ?, ?, 0, ?, ?, ?, ?)
+      INSERT INTO jobs (id, type, payload, status, created_at, updated_at, scheduled_at, attempts, options, stuck_timeout_ms, priority, expires_at, concurrency_key)
+      VALUES (?, ?, ?, 'pending', ?, ?, ?, 0, ?, ?, ?, ?, ?)
     `);
         const now = Date.now();
         const stuckTimeoutMs = options.stuckTimeoutMs ?? null;
@@ -221,7 +232,8 @@ export class SQLiteQueue implements IQueue {
         const expiresAt = options.ttlMs ? now + options.ttlMs : null;
         const id = randomUUID();
         const scheduled_at = now + delayMs;
-        stmt.run(id, type, JSON.stringify(payload), now, now, scheduled_at, JSON.stringify(options), stuckTimeoutMs, priority, expiresAt);
+        stmt.run(id, type, JSON.stringify(payload), now, now, scheduled_at, JSON.stringify(options), stuckTimeoutMs,
+            priority, expiresAt, concurrencyKey);
 
         return {
             id,
@@ -248,10 +260,11 @@ export class SQLiteQueue implements IQueue {
         const priority = options.priority ?? 0;
         const expiresAt = options.ttlMs ? now + options.ttlMs : null;
         const id = randomUUID();
+        const concurrencyKey = this.concurrency(options);
 
         this.db.prepare(`
-            INSERT INTO jobs (id, name, type, payload, status, created_at, updated_at, scheduled_at, attempts, options, stuck_timeout_ms, priority, expires_at)
-            VALUES (?, ?, ?, ?, 'pending', ?, ?, ?, 0, ?, ?, ?, ?)
+            INSERT INTO jobs (id, name, type, payload, status, created_at, updated_at, scheduled_at, attempts, options, stuck_timeout_ms, priority, expires_at, concurrency_key)
+            VALUES (?, ?, ?, ?, 'pending', ?, ?, ?, 0, ?, ?, ?, ?, ?)
             ON CONFLICT(name) DO UPDATE SET
                 type         = excluded.type,
                 scheduled_at = excluded.scheduled_at,
@@ -273,6 +286,7 @@ export class SQLiteQueue implements IQueue {
                 stuck_timeout_ms = excluded.stuck_timeout_ms,
                 priority         = excluded.priority,
                 expires_at       = excluded.expires_at,
+                concurrency_key  = excluded.concurrency_key,
                 error            = CASE
                     WHEN jobs.status IN ('failed', 'completed') THEN NULL
                     ELSE jobs.error
@@ -282,7 +296,8 @@ export class SQLiteQueue implements IQueue {
                     ELSE jobs.claim_token
                 END
             WHERE jobs.status IN ('pending', 'failed', 'completed')
-        `).run(id, name, type, JSON.stringify(payload), now, now, scheduled_at, JSON.stringify(options), stuckTimeoutMs, priority, expiresAt);
+        `).run(id, name, type, JSON.stringify(payload), now, now, scheduled_at, JSON.stringify(options), stuckTimeoutMs,
+            priority, expiresAt, concurrencyKey);
     }
 
     async list(status: Job['status'], limit: number = 20, type?: string): Promise<Job[]> {
@@ -381,7 +396,14 @@ export class SQLiteQueue implements IQueue {
                 SELECT * FROM jobs 
                 WHERE status = 'pending' 
                 AND (scheduled_at IS NULL OR scheduled_at <= ?)
-                ORDER BY priority DESC, scheduled_at ASC, created_at ASC 
+                AND (
+                    concurrency_key IS NULL OR NOT EXISTS (
+                        SELECT 1 FROM jobs active
+                        WHERE active.status = 'processing'
+                          AND active.concurrency_key = jobs.concurrency_key
+                    )
+                )
+                ORDER BY priority DESC, scheduled_at ASC, created_at ASC, jobs.rowid ASC
                 LIMIT 1
             `);
 
@@ -467,6 +489,13 @@ export class SQLiteQueue implements IQueue {
         `);
         const result = stmt.run(Date.now(), jobId, claimToken ?? null, claimToken ?? null);
         this.assertClaimTransition(jobId, claimToken, result.changes);
+    }
+
+    private concurrency(options: JobOptions): string | null {
+        if (options.concurrencyKey === undefined) return null;
+        const key = options.concurrencyKey?.trim();
+        if (!key) throw new Error('concurrencyKey must be a non-empty string');
+        return key;
     }
 
     async complete(jobId: string, claimToken?: string): Promise<void> {

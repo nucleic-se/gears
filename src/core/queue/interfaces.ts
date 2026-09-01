@@ -7,6 +7,8 @@ export interface JobOptions {
     executionTimeoutMs?: number;
     priority?: number; // Higher is better (default 0)
     ttlMs?: number; // Time-to-live: job expires if not completed within this many ms of creation
+    /** Jobs sharing this key execute one at a time while remaining durably queued. */
+    concurrencyKey?: string;
 }
 
 export interface Job<T = any> {

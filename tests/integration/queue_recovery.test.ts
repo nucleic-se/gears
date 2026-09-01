@@ -160,8 +160,9 @@ describe('Queue Recovery', () => {
         const version = migrated.prepare('SELECT version FROM _schema_version').pluck().get();
         const columns = migrated.prepare('PRAGMA table_info(jobs)').all() as Array<{ name: string }>;
 
-        expect(version).toBe(4);
+        expect(version).toBe(5);
         expect(columns.map(({ name }) => name)).toContain('claim_token');
+        expect(columns.map(({ name }) => name)).toContain('concurrency_key');
         migrated.close();
     });
 
