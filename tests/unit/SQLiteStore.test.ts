@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { SQLiteStore } from '../../src/core/infra/SQLiteStore.js';
+import { SQLiteStore, StoreCorruptionError } from '../../src/core/infra/SQLiteStore.js';
 import { getDbPath } from '../../src/core/utils/paths.js';
 import fs from 'fs';
 import Database from 'better-sqlite3';
@@ -37,19 +37,20 @@ describe('SQLiteStore', () => {
         expect(val).toBeNull();
     });
 
-    it('should handle corrupted JSON gracefully', async () => {
+    it('quarantines corrupted JSON and fails visibly', async () => {
         // manually inject bad data
         const db = new Database(dbPath);
         db.exec("INSERT INTO store (key, value) VALUES ('corrupt', '{bad_json')");
         db.close();
 
-        // Should not throw, should return null
-        const val = await store.get('corrupt');
-        expect(val).toBeNull();
+        await expect(store.get('corrupt')).rejects.toBeInstanceOf(StoreCorruptionError);
 
-        // Should have deleted the key
-        const val2 = await store.get('corrupt');
-        expect(val2).toBeNull();
+        const verification = new Database(dbPath);
+        expect(verification.prepare('SELECT key FROM store WHERE key = ?').get('corrupt')).toBeUndefined();
+        expect(verification.prepare('SELECT key, value, error FROM store_corrupt WHERE key = ?').get('corrupt')).toEqual({
+            key: 'corrupt', value: '{bad_json', error: 'JSON parse failed',
+        });
+        verification.close();
     });
 
     it('isolates scans at namespace boundaries', async () => {

@@ -2,15 +2,20 @@ import Database from 'better-sqlite3';
 import { IMutex } from '../interfaces.js';
 import { getDbPath } from '../utils/paths.js';
 import crypto from 'crypto';
+import { hardenPrivateDatabaseFiles, validatePrivateDatabasePath } from './private-sqlite.js';
 
 export class SQLiteMutex implements IMutex {
     private db: Database.Database;
+    private readonly databasePath: string;
     private owners = new Map<string, string>();
 
     constructor(dbPath: string = 'locks.sqlite', resolvePath: (file: string) => string = getDbPath) {
         const fullPath = resolvePath(dbPath);
+        validatePrivateDatabasePath(fullPath);
+        this.databasePath = fullPath;
         this.db = new Database(fullPath);
         this.init();
+        hardenPrivateDatabaseFiles(this.databasePath);
     }
 
     private init() {
@@ -130,5 +135,6 @@ export class SQLiteMutex implements IMutex {
 
         this.owners.clear();
         this.db.close();
+        hardenPrivateDatabaseFiles(this.databasePath);
     }
 }

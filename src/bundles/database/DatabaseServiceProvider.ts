@@ -3,6 +3,7 @@ import Database from 'better-sqlite3';
 import { Kysely, SqliteDialect, sql } from 'kysely';
 
 import type { DatabaseSchema } from './index.js';
+import { hardenPrivateDatabaseFiles, validatePrivateDatabasePath } from '../../core/infra/private-sqlite.js';
 
 export class DatabaseServiceProvider extends ServiceProvider {
     async register(): Promise<void> {
@@ -10,9 +11,11 @@ export class DatabaseServiceProvider extends ServiceProvider {
 
         const dbPath = process.env.GEARS_APP_DB_PATH || 'app.sqlite';
         const fullPath = app.make('DataPaths').getDbPath(dbPath);
+        validatePrivateDatabasePath(fullPath);
         const nativeDb = new Database(fullPath);
         nativeDb.pragma('journal_mode = WAL');
         nativeDb.pragma('busy_timeout = 5000');
+        hardenPrivateDatabaseFiles(fullPath);
 
         const db = new Kysely<DatabaseSchema>({
             dialect: new SqliteDialect({
@@ -29,6 +32,7 @@ export class DatabaseServiceProvider extends ServiceProvider {
         (db as Kysely<DatabaseSchema> & { close?: () => Promise<void> }).close = async () => {
             await db.destroy();
             if (nativeDb.open) nativeDb.close();
+            hardenPrivateDatabaseFiles(fullPath);
         };
 
         this.app.singleton('db', () => db);

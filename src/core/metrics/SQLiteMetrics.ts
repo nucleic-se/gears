@@ -1,14 +1,18 @@
 import Database from 'better-sqlite3';
 import { IMetrics, MetricSnapshot } from './interfaces.js';
 import { getDbPath } from '../utils/paths.js';
+import { hardenPrivateDatabaseFiles, validatePrivateDatabasePath } from '../infra/private-sqlite.js';
 
 export class SQLiteMetrics implements IMetrics {
     private db: Database.Database;
     private ownsDb: boolean;
+    private databasePath?: string;
 
     constructor(dbOrPath: Database.Database | string) {
         if (typeof dbOrPath === 'string') {
             const fullPath = getDbPath(dbOrPath);
+            validatePrivateDatabasePath(fullPath);
+            this.databasePath = fullPath;
             this.db = new Database(fullPath);
             this.ownsDb = true;
             this.db.pragma('journal_mode = WAL');
@@ -18,6 +22,7 @@ export class SQLiteMetrics implements IMetrics {
             this.ownsDb = false;
         }
         this.initSchema();
+        if (this.databasePath) hardenPrivateDatabaseFiles(this.databasePath);
     }
 
     private initSchema() {
@@ -91,6 +96,7 @@ export class SQLiteMetrics implements IMetrics {
         if (this.ownsDb && this.db.open) {
             this.db.close();
         }
+        if (this.databasePath) hardenPrivateDatabaseFiles(this.databasePath);
     }
 
     dispose(): void {

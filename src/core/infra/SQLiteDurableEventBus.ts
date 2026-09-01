@@ -2,6 +2,7 @@ import Database from 'better-sqlite3';
 import { randomUUID } from 'crypto';
 import { IDurableEventBus, EventHandler } from '../events/interfaces.js';
 import { getDbPath } from '../utils/paths.js';
+import { hardenPrivateDatabaseFiles, validatePrivateDatabasePath } from './private-sqlite.js';
 
 interface EventRow {
     id: number;
@@ -13,6 +14,7 @@ interface EventRow {
 export class SQLiteDurableEventBus implements IDurableEventBus {
     private db: Database.Database;
     private ownsDb: boolean;
+    private databasePath?: string;
     private sourceId = randomUUID();
     private cursor = 0;
     private handlers = new Map<string, EventHandler[]>();
@@ -24,6 +26,8 @@ export class SQLiteDurableEventBus implements IDurableEventBus {
     constructor(dbOrPath: Database.Database | string = 'events.sqlite', retentionMs: number = 3_600_000) {
         if (typeof dbOrPath === 'string') {
             const fullPath = getDbPath(dbOrPath);
+            validatePrivateDatabasePath(fullPath);
+            this.databasePath = fullPath;
             this.db = new Database(fullPath);
             this.ownsDb = true;
             this.db.pragma('journal_mode = WAL');
@@ -34,6 +38,7 @@ export class SQLiteDurableEventBus implements IDurableEventBus {
         }
         this.retentionMs = retentionMs;
         this.initSchema();
+        if (this.databasePath) hardenPrivateDatabaseFiles(this.databasePath);
     }
 
     private initSchema(): void {
@@ -154,6 +159,7 @@ export class SQLiteDurableEventBus implements IDurableEventBus {
         if (this.ownsDb && this.db.open) {
             this.db.close();
         }
+        if (this.databasePath) hardenPrivateDatabaseFiles(this.databasePath);
     }
 
     dispose(): void {

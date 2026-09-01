@@ -2,6 +2,13 @@ import fs from 'fs/promises';
 import { randomUUID } from 'crypto';
 import { ILogger } from '../interfaces.js';
 
+export class StaleFileLockError extends Error {
+    constructor(readonly lockPath: string) {
+        super(`Stale lock requires explicit cleanup while its service is stopped: ${lockPath}`);
+        this.name = 'StaleFileLockError';
+    }
+}
+
 interface LockOwner {
     pid: number;
     token?: string;
@@ -35,13 +42,7 @@ export class FileLock {
                 if (e.code === 'EEXIST') {
                     // Check for stale lock
                     const stale = await this.isStale();
-                    if (stale) {
-                        if (await this.moveStaleLock()) {
-                            this.logger?.warn(`Removed stale lock file`, { path: this.lockPath });
-                            i--; // Stale cleanup does not consume an acquisition attempt.
-                            continue;
-                        }
-                    }
+                    if (stale) throw new StaleFileLockError(this.lockPath);
 
                     // Wait and retry
                     await new Promise(resolve => setTimeout(resolve, delayMs));
@@ -92,18 +93,6 @@ export class FileLock {
             await fs.link(tempPath, this.lockPath);
         } finally {
             await fs.rm(tempPath, { force: true });
-        }
-    }
-
-    private async moveStaleLock(): Promise<boolean> {
-        const stalePath = `${this.lockPath}.stale.${randomUUID()}`;
-        try {
-            await fs.rename(this.lockPath, stalePath);
-            await fs.rm(stalePath, { force: true });
-            return true;
-        } catch (error: any) {
-            if (error.code === 'ENOENT') return true;
-            return false;
         }
     }
 

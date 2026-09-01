@@ -12,7 +12,7 @@ export class PidLocker {
     /**
      * Attempts to acquire the lock.
      * Throws if another active worker holds the lock.
-     * Cleans up stale locks.
+     * Refuses stale locks; cleanup is an explicit stopped-service operation.
      */
     acquire(): void {
         const lockDir = path.dirname(this.lockPath);
@@ -25,7 +25,7 @@ export class PidLocker {
 
         for (let attempt = 0; attempt < 2; attempt++) {
             try {
-                const fd = fs.openSync(this.lockPath, 'wx');
+                const fd = fs.openSync(this.lockPath, 'wx', 0o600);
                 try {
                     fs.writeFileSync(fd, payload, 'utf8');
                 } finally {
@@ -42,23 +42,7 @@ export class PidLocker {
                     throw new Error(`Worker already running (PID: ${existingPid})`);
                 }
 
-                // Stale lock: atomically rename it out of the way instead of unlinking.
-                // This prevents a TOCTOU race where two processes both see the same stale PID,
-                // both unlink, and both successfully create a new lock via O_EXCL.
-                // With rename, only one process moves the stale file; the other's rename
-                // fails with ENOENT, and its subsequent O_EXCL attempt correctly loses the race.
-                const stalePath = `${this.lockPath}.stale.${process.pid}`;
-                try {
-                    fs.renameSync(this.lockPath, stalePath);
-                    // Clean up the renamed stale file
-                    try { fs.unlinkSync(stalePath); } catch { /* best effort */ }
-                } catch (renameErr: any) {
-                    if (renameErr.code === 'ENOENT') {
-                        // Another process already cleaned up the stale lock — retry O_EXCL
-                        continue;
-                    }
-                    throw new Error('Unable to clear stale worker lock');
-                }
+                throw new Error(`Stale worker lock requires explicit cleanup while the worker is stopped: ${this.lockPath}`);
             }
         }
 

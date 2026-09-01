@@ -29,6 +29,8 @@ export class Worker {
     private defaultExecutionTimeoutMs: number;
     private activeJobs: number = 0;
     private activePromises: Set<Promise<void>> = new Set();
+    private activeHandlerPromises: Set<Promise<void>> = new Set();
+    private activeControllers: Map<string, AbortController> = new Map();
     private activeJobMap: Map<string, Job> = new Map(); // Track active job objects
     private metrics?: any; // IMetrics
     private metricsInterval: NodeJS.Timeout | null = null;
@@ -144,28 +146,23 @@ export class Worker {
         if (this.recoveryInterval) clearInterval(this.recoveryInterval);
         if (this.metricsInterval) clearInterval(this.metricsInterval);
         this.logger.info(`Worker stopping`, { activeJobs: this.activePromises.size });
+        for (const controller of this.activeControllers.values()) {
+            controller.abort(new WorkerStoppingError());
+        }
 
-        let forced = false;
-        let timeoutTimer: NodeJS.Timeout;
-
-        const drainPromise = Promise.allSettled(this.activePromises);
-        const timeoutPromise = new Promise<void>(resolve => {
-            timeoutTimer = setTimeout(() => {
-                forced = true;
-                resolve();
-            }, this.shutdownTimeoutMs);
-        });
-
-        // Wait for drain OR timeout
-        await Promise.race([drainPromise, timeoutPromise]);
-        clearTimeout(timeoutTimer!);
-
-        if (forced) {
+        const timeoutTimer = setTimeout(() => {
             this.logger.warn(`Worker shutdown timed out`, {
                 timeoutMs: this.shutdownTimeoutMs,
-                remainingJobs: this.activeJobMap.size
+                remainingJobs: this.activeJobMap.size,
+                remainingHandlers: this.activeHandlerPromises.size,
             });
-        }
+        }, this.shutdownTimeoutMs);
+
+        // Dependencies must remain alive until every invoked handler has actually
+        // settled. A non-cooperative in-process handler therefore prevents clean
+        // shutdown and leaves the supervisor to terminate the process.
+        await Promise.allSettled([...this.activePromises, ...this.activeHandlerPromises]);
+        clearTimeout(timeoutTimer);
 
         // Queue lifecycle is owned by the Container (IQueue singleton).
         // Container's LIFO shutdown closes it after Worker.dispose().
@@ -196,6 +193,7 @@ export class Worker {
 
         let heartbeatTimer: NodeJS.Timeout | null = null;
         const controller = new AbortController();
+        this.activeControllers.set(job.id, controller);
         let claimLost = false;
 
         if (heartbeatIntervalMs >= stuckTimeoutMs) {
@@ -267,6 +265,11 @@ export class Worker {
                 return;
             }
 
+            if (err instanceof WorkerStoppingError) {
+                await this.queue.release(job.id, job.claimToken ?? undefined);
+                return;
+            }
+
             const maxRetries = job.options?.maxRetries ?? 3;
             const backoff = job.options?.backoffBase ?? 1000;
 
@@ -311,6 +314,7 @@ export class Worker {
             }
         } finally {
             if (heartbeatTimer) clearInterval(heartbeatTimer);
+            this.activeControllers.delete(job.id);
             this.activeJobMap.delete(job.id); // Remove from tracking
         }
     }
@@ -337,9 +341,15 @@ export class Worker {
             }, timeoutMs);
         });
 
+        const handlerPromise = Promise.resolve().then(() => handler(job, { signal: controller.signal }));
+        this.activeHandlerPromises.add(handlerPromise);
+        void handlerPromise.then(
+            () => this.activeHandlerPromises.delete(handlerPromise),
+            () => this.activeHandlerPromises.delete(handlerPromise),
+        );
         try {
             await Promise.race([
-                handler(job, { signal: controller.signal }),
+                handlerPromise,
                 timeoutPromise,
                 abortPromise,
             ]);
@@ -353,5 +363,12 @@ class JobExecutionTimeoutError extends Error {
     constructor(timeoutMs: number) {
         super(`Timeout: Job exceeded ${timeoutMs}ms`);
         this.name = 'JobExecutionTimeoutError';
+    }
+}
+
+class WorkerStoppingError extends Error {
+    constructor() {
+        super('Worker is stopping');
+        this.name = 'WorkerStoppingError';
     }
 }

@@ -6,6 +6,7 @@ import { SQLiteMetrics } from '../metrics/SQLiteMetrics.js';
 import { CronScheduler } from './CronScheduler.js';
 import { SQLiteDurableEventBus } from './SQLiteDurableEventBus.js';
 import { SQLiteStore } from './SQLiteStore.js';
+import { hardenPrivateDatabaseFiles, validatePrivateDatabasePath } from './private-sqlite.js';
 
 /**
  * Owns Gears' low-contention shared SQLite connection. The connection never
@@ -13,11 +14,15 @@ import { SQLiteStore } from './SQLiteStore.js';
  */
 export class SharedDatabase {
     readonly #db: Database.Database;
+    readonly #path: string;
 
     constructor(fullPath: string) {
+        validatePrivateDatabasePath(fullPath);
+        this.#path = fullPath;
         this.#db = new Database(fullPath);
         this.#db.pragma('journal_mode = WAL');
         this.#db.pragma('busy_timeout = 5000');
+        hardenPrivateDatabaseFiles(fullPath);
     }
 
     createStore(): IStore {
@@ -35,6 +40,7 @@ export class SharedDatabase {
 
     close(): void {
         if (this.#db.open) this.#db.close();
+        hardenPrivateDatabaseFiles(this.#path);
     }
 
     dispose(): void { this.close(); }

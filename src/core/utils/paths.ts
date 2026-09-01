@@ -19,6 +19,14 @@ export class DataPaths implements IDataPaths {
 
     ensureDataDir(): string {
         if (!fs.existsSync(this.dataDir)) fs.mkdirSync(this.dataDir, { recursive: true, mode: 0o700 });
+        const metadata = fs.lstatSync(this.dataDir);
+        if (!metadata.isDirectory() || metadata.isSymbolicLink()) {
+            throw new Error(`dataDir must be a real directory: ${this.dataDir}`);
+        }
+        if (typeof process.getuid === 'function' && metadata.uid !== process.getuid()) {
+            throw new Error(`dataDir is not owned by the current service identity: ${this.dataDir}`);
+        }
+        fs.chmodSync(this.dataDir, 0o700);
         return this.dataDir;
     }
 
@@ -64,11 +72,7 @@ export function getDataDir(): string {
  * Ensure the data directory exists, creating it if necessary.
  */
 export function ensureDataDir(): string {
-    const dataDir = getDataDir();
-    if (!fs.existsSync(dataDir)) {
-        fs.mkdirSync(dataDir, { recursive: true });
-    }
-    return dataDir;
+    return new DataPaths(getDataDir()).ensureDataDir();
 }
 
 /**

@@ -66,11 +66,12 @@ describe('Core Hardening Integration', () => {
         expect(poisonJob?.attempts).toBe(0);
     });
 
-    it('should force shutdown if jobs assume too long', async () => {
-        // Setup slow handler
+    it('aborts and reaps cooperative handlers before shutdown returns', async () => {
         const handlers = new Map();
-        handlers.set('slow-job', async () => {
-            await new Promise(r => setTimeout(r, 1000)); // 1s
+        let handlerSettled = false;
+        handlers.set('slow-job', async (_job: Job, { signal }: { signal: AbortSignal }) => {
+            await new Promise<void>(resolve => signal.addEventListener('abort', () => resolve(), { once: true }));
+            handlerSettled = true;
         });
         app.singleton('JobHandlers', () => handlers);
 
@@ -89,16 +90,15 @@ describe('Core Hardening Integration', () => {
         await worker.stop();
         const duration = Date.now() - start;
 
-        // Should return quickly, near timeout (plus some buffer)
+        // Cooperative work is aborted and truly settled before stop returns.
         expect(duration).toBeLessThan(500);
+        expect(handlerSettled).toBe(true);
 
-        // Job should still be processing (left as zombie, to be recovered later)
-        // Note: worker.stop() closes the queue connection, so we open a new one to verify
+        // Shutdown releases the exact claim for another worker.
         const dbVerify = new Database(TEST_DB_PATH);
-        const zombieJobs = dbVerify.prepare("SELECT * FROM jobs WHERE status = 'processing'").all();
+        const pendingJobs = dbVerify.prepare("SELECT * FROM jobs WHERE status = 'pending'").all();
         dbVerify.close();
-
-        expect(zombieJobs.length).toBe(1);
+        expect(pendingJobs.length).toBe(1);
     });
 
     it('should fail jobs that exceed execution timeout', async () => {
@@ -209,10 +209,9 @@ describe('Core Hardening Integration', () => {
         });
 
         const handlers = new Map();
-        handlers.set('zombie-prevention', async () => {
+        handlers.set('zombie-prevention', async (_job: Job, { signal }: { signal: AbortSignal }) => {
             handlerStarted!();
-            // Hang until stopped
-            await new Promise(r => setTimeout(r, 5000));
+            await new Promise<void>(resolve => signal.addEventListener('abort', () => resolve(), { once: true }));
         });
         app.singleton('JobHandlers', () => handlers);
 
@@ -242,6 +241,6 @@ describe('Core Hardening Integration', () => {
         dbVerify.close();
         // Job should be in a terminal state or recoverable, not silently lost
         expect(stoppedJob).toBeDefined();
-        expect(['pending', 'failed', 'completed', 'processing']).toContain(stoppedJob!.status);
+        expect(stoppedJob!.status).toBe('pending');
     });
 });

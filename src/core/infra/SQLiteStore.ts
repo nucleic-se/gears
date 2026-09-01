@@ -1,16 +1,27 @@
 import Database from 'better-sqlite3';
 import { IStore } from '../interfaces.js';
 import { getDbPath } from '../utils/paths.js';
+import { hardenPrivateDatabaseFiles, validatePrivateDatabasePath } from './private-sqlite.js';
+
+export class StoreCorruptionError extends Error {
+    constructor(readonly key: string) {
+        super(`Durable store record is corrupt and was quarantined: ${key}`);
+        this.name = 'StoreCorruptionError';
+    }
+}
 
 export class SQLiteStore implements IStore {
     private db: Database.Database;
     private prefix: string;
     private ownsDb: boolean;
+    private databasePath?: string;
     private sweepTimer: NodeJS.Timeout | null = null;
 
     constructor(dbOrPath: Database.Database | string = 'store.sqlite', prefix: string = '') {
         if (typeof dbOrPath === 'string') {
             const fullPath = getDbPath(dbOrPath);
+            validatePrivateDatabasePath(fullPath);
+            this.databasePath = fullPath;
             this.db = new Database(fullPath);
             this.ownsDb = true;
             this.db.pragma('journal_mode = WAL');
@@ -21,6 +32,7 @@ export class SQLiteStore implements IStore {
         }
         this.prefix = prefix;
         this.initSchema();
+        if (this.databasePath) hardenPrivateDatabaseFiles(this.databasePath);
     }
 
     /** Internal constructor for namespaced views (shares DB connection) */
@@ -38,6 +50,15 @@ export class SQLiteStore implements IStore {
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL,
                 expires_at INTEGER
+            )
+            ;
+            CREATE TABLE IF NOT EXISTS store_corrupt (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                key TEXT NOT NULL,
+                value TEXT NOT NULL,
+                expires_at INTEGER,
+                detected_at INTEGER NOT NULL,
+                error TEXT NOT NULL
             )
         `);
     }
@@ -64,10 +85,9 @@ export class SQLiteStore implements IStore {
 
         try {
             return JSON.parse(row.value) as T;
-        } catch (e) {
-            // Self-repair: Delete corrupted entry
-            this.db.prepare('DELETE FROM store WHERE key = ?').run(fk);
-            return null;
+        } catch {
+            this.quarantine(fk, row.value, row.expires_at, 'JSON parse failed');
+            throw new StoreCorruptionError(fk);
         }
     }
 
@@ -156,12 +176,23 @@ export class SQLiteStore implements IStore {
 
             try {
                 result[userKey] = JSON.parse(row.value);
-            } catch (e) {
-                // Ignore corrupted
+            } catch {
+                this.quarantine(row.key, row.value, row.expires_at, 'JSON parse failed during scan');
+                throw new StoreCorruptionError(row.key);
             }
         }
 
         return result;
+    }
+
+    private quarantine(key: string, value: string, expiresAt: number | null, error: string): void {
+        this.db.transaction(() => {
+            this.db.prepare(`
+                INSERT INTO store_corrupt (key, value, expires_at, detected_at, error)
+                SELECT key, value, expires_at, ?, ? FROM store WHERE key = ? AND value = ?
+            `).run(Date.now(), error, key, value);
+            this.db.prepare('DELETE FROM store WHERE key = ? AND value = ?').run(key, value);
+        }).immediate();
     }
 
     /** Start periodic cleanup of expired keys (default: every 5 minutes, batch size: 1000) */
@@ -189,6 +220,7 @@ export class SQLiteStore implements IStore {
         if (this.ownsDb && this.db.open) {
             this.db.close();
         }
+        if (this.databasePath) hardenPrivateDatabaseFiles(this.databasePath);
     }
 
     dispose(): void {

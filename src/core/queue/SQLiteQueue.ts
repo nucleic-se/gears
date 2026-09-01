@@ -3,9 +3,11 @@ import { IJobRegistry, IQueue, Job, JobClaimLostError, JobOptions } from './inte
 import { randomUUID } from 'crypto';
 import { getDbPath } from '../utils/paths.js';
 import { JobValidationError } from './JobRegistry.js';
+import { hardenPrivateDatabaseFiles, validatePrivateDatabasePath } from '../infra/private-sqlite.js';
 
 export class SQLiteQueue implements IQueue {
     private db: Database.Database;
+    private readonly databasePath: string;
 
     constructor(
         dbPath: string = 'jobs.sqlite',
@@ -13,6 +15,8 @@ export class SQLiteQueue implements IQueue {
         resolvePath: (file: string) => string = getDbPath,
     ) {
         const fullPath = resolvePath(dbPath);
+        validatePrivateDatabasePath(fullPath);
+        this.databasePath = fullPath;
         this.db = new Database(fullPath);
         this.init();
     }
@@ -21,6 +25,7 @@ export class SQLiteQueue implements IQueue {
         this.db.pragma('journal_mode = WAL');
         this.db.pragma('busy_timeout = 5000');
         this.migrate();
+        hardenPrivateDatabaseFiles(this.databasePath);
     }
 
     private migrate() {
@@ -628,6 +633,7 @@ export class SQLiteQueue implements IQueue {
 
     async close(): Promise<void> {
         this.db.close();
+        hardenPrivateDatabaseFiles(this.databasePath);
     }
 
     private assertClaimTransition(jobId: string, claimToken: string | undefined, changes: number): void {

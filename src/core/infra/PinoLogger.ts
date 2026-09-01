@@ -1,5 +1,6 @@
 import pino from 'pino';
 import path from 'path';
+import fs from 'node:fs';
 import { ILogger, OutputMode } from '../interfaces.js';
 import { ensureDataDir } from '../utils/paths.js';
 
@@ -54,7 +55,9 @@ export class PinoLogger implements ILogger {
         // File stream (Always) - ensure data dir exists
         try {
             const dataDir = options.dataDir ?? ensureDataDir();
-            const fileStream = pino.destination(path.join(dataDir, 'app.log'));
+            const logPath = path.join(dataDir, 'app.log');
+            const fileStream = pino.destination(logPath);
+            if (fs.existsSync(logPath)) fs.chmodSync(logPath, 0o600);
             this.ownedStreams.push(fileStream);
             streams.push({ stream: fileStream });
         } catch (e) {

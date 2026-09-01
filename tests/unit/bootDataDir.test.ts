@@ -20,8 +20,28 @@ describe('boot dataDir option', () => {
         await queue.add('test-job', { ok: true });
 
         expect(fs.existsSync(path.join(dataDir, 'jobs.sqlite'))).toBe(true);
+        expect(fs.statSync(dataDir).mode & 0o777).toBe(0o700);
+        expect(fs.statSync(path.join(dataDir, 'jobs.sqlite')).mode & 0o777).toBe(0o600);
 
         await app.shutdown();
+    });
+
+    it('rejects symlink and hard-link database aliases before opening SQLite', async () => {
+        const symlinkRoot = path.join(tempRoot, 'symlink-root');
+        const outside = path.join(tempRoot, 'outside.sqlite');
+        fs.mkdirSync(symlinkRoot, { recursive: true });
+        fs.writeFileSync(outside, 'outside');
+        fs.symlinkSync(outside, path.join(symlinkRoot, 'jobs.sqlite'));
+        const symlinkContainer = await boot({ dataDir: symlinkRoot });
+        expect(() => symlinkContainer.make('IQueue')).toThrow(/non-symlink/);
+        await symlinkContainer.shutdown();
+
+        const hardlinkRoot = path.join(tempRoot, 'hardlink-root');
+        fs.mkdirSync(hardlinkRoot, { recursive: true });
+        fs.linkSync(outside, path.join(hardlinkRoot, 'jobs.sqlite'));
+        const hardlinkContainer = await boot({ dataDir: hardlinkRoot });
+        expect(() => hardlinkContainer.make('IQueue')).toThrow(/hard-link aliases/);
+        await hardlinkContainer.shutdown();
     });
 
     it('keeps two containers on their own immutable data roots', async () => {
