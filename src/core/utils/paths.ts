@@ -1,10 +1,35 @@
 import path from 'path';
 import fs from 'fs';
 
-let configuredDataDir: string | undefined;
+export interface IDataPaths {
+    readonly dataDir: string;
+    ensureDataDir(): string;
+    getDbPath(filename: string): string;
+}
 
-export function setDataDir(dataDir?: string): void {
-    configuredDataDir = dataDir ? path.resolve(dataDir) : undefined;
+/** Immutable storage paths owned by one application container. */
+export class DataPaths implements IDataPaths {
+    readonly dataDir: string;
+
+    constructor(dataDir: string) {
+        const resolved = path.resolve(dataDir);
+        if (!path.isAbsolute(resolved)) throw new Error(`dataDir must resolve to an absolute path: ${dataDir}`);
+        this.dataDir = resolved;
+    }
+
+    ensureDataDir(): string {
+        if (!fs.existsSync(this.dataDir)) fs.mkdirSync(this.dataDir, { recursive: true, mode: 0o700 });
+        return this.dataDir;
+    }
+
+    getDbPath(filename: string): string {
+        const root = path.resolve(this.ensureDataDir());
+        const resolved = path.isAbsolute(filename) ? path.resolve(filename) : path.resolve(root, filename);
+        if (resolved !== root && !resolved.startsWith(`${root}${path.sep}`)) {
+            throw new Error(`Security Violation: Path traversal detected. '${filename}' resolves outside data directory.`);
+        }
+        return resolved;
+    }
 }
 
 /**
@@ -17,7 +42,7 @@ export function setDataDir(dataDir?: string): void {
  * @throws Error if GEARS_DATA_DIR is not set or not absolute
  */
 export function getDataDir(): string {
-    let dataDir = configuredDataDir ?? process.env.GEARS_DATA_DIR;
+    let dataDir = process.env.GEARS_DATA_DIR;
 
     if (!dataDir) {
         dataDir = path.resolve(process.cwd(), '.gears');

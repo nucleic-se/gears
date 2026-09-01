@@ -70,6 +70,12 @@ All databases live under `GEARS_DATA_DIR` (defaults to `./.gears`):
 - `shared.sqlite` — shared DB used by store, metrics, and durable event bus
 - `app.sqlite` — app data (Kysely, via database bundle)
 
+At boot, the selected root becomes one immutable `DataPaths` dependency owned by
+that container. Multiple containers in one process may use different roots without
+redirecting each other's later-created services. The shared SQLite handle remains
+private to its infrastructure owner; store, scheduler, event, and metrics services
+cross only their narrow interfaces.
+
 Key configuration:
 - **WAL mode** — concurrent reads during writes
 - **Busy timeout** — waits for locks instead of failing immediately
@@ -78,6 +84,10 @@ Key configuration:
 ### Failure Handling
 
 - **Worker crash**: Recovery loop resets jobs stuck in `processing` beyond timeout
+- **Delivery contract**: queue handlers are at-least-once and receive a mandatory
+  `AbortSignal`. They must stop on cancellation and make effects idempotent or
+  application-fenced. Non-cooperative effectful code must run in a killable child
+  process; Gears does not pretend an in-process promise can be forcibly reaped.
 - **Lock expiry**: Mutex entries have TTLs; stale locks are garbage-collected
 - **Job retries**: Configurable max attempts with exponential backoff
 

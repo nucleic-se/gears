@@ -7,8 +7,8 @@ export class SQLiteMutex implements IMutex {
     private db: Database.Database;
     private owners = new Map<string, string>();
 
-    constructor(dbPath: string = 'locks.sqlite') {
-        const fullPath = getDbPath(dbPath);
+    constructor(dbPath: string = 'locks.sqlite', resolvePath: (file: string) => string = getDbPath) {
+        const fullPath = resolvePath(dbPath);
         this.db = new Database(fullPath);
         this.init();
     }

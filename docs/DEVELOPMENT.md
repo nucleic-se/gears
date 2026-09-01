@@ -292,7 +292,8 @@ async shutdown(app) {
 ```typescript
 async boot(): Promise<void> {
     const handlers = this.app.make('JobHandlers');
-    handlers.set('my-job-type', async (job) => {
+    handlers.set('my-job-type', async (job, { signal }) => {
+        signal.throwIfAborted();
         console.log('Processing:', job.payload);
     });
 }

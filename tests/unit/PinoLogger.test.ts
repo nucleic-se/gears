@@ -4,7 +4,6 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { PinoLogger } from '../../src/core/infra/PinoLogger.js';
-import { setDataDir } from '../../src/core/utils/paths.js';
 
 const directories: string[] = [];
 
@@ -16,8 +15,7 @@ describe('PinoLogger', () => {
     it('flushes and closes every owned stream exactly once', async () => {
         const directory = await mkdtemp(join(tmpdir(), 'gears-pino-logger-'));
         directories.push(directory);
-        setDataDir(directory);
-        const logger = new PinoLogger({ mode: 'text' });
+        const logger = new PinoLogger({ mode: 'text', dataDir: directory });
         const streams = (logger as unknown as {
             ownedStreams: Array<{ destroyed?: boolean; closed?: boolean }>;
         }).ownedStreams;

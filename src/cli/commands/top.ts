@@ -4,7 +4,6 @@ import { IMetrics, MetricSnapshot } from '../../core/metrics/interfaces.js';
 import { IQueue } from '../../core/queue/interfaces.js';
 import path from 'path';
 import fs from 'fs';
-import { getDataDir } from '../../core/utils/paths.js';
 
 export function createTopWidgets(screen: blessed.Widgets.Screen) {
     const statusBox = blessed.box({
@@ -136,8 +135,7 @@ export async function topCommand(app: Container) {
         try {
             // Update Status
             const uptime = process.uptime().toFixed(0);
-            const dbName = (queue as any).db?.name || 'SQLite';
-            statusBox.setContent(`Gears Inspector | Uptime: ${uptime}s | Connected to: ${dbName}`);
+            statusBox.setContent(`Gears Inspector | Uptime: ${uptime}s | Queue: durable`);
 
             // Update Queue Stats
             const qStats = await queue.stats();
@@ -170,7 +168,7 @@ export async function topCommand(app: Container) {
 
             // Tail log lines from file
             try {
-                const logPath = path.join(getDataDir(), 'app.log');
+                const logPath = path.join(app.make('DataPaths').dataDir, 'app.log');
                 if (fs.existsSync(logPath)) {
                     // Read last 4KB
                     const stats = fs.statSync(logPath);

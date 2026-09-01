@@ -2,14 +2,10 @@ import { ServiceProvider } from '../container/ServiceProvider.js';
 import { RateLimitedFetcher } from '../infra/RateLimitedFetcher.js';
 import { BundleManager } from '../bundle/BundleManager.js';
 import { SQLiteMutex } from '../infra/SQLiteMutex.js';
-import { CronScheduler } from '../infra/CronScheduler.js';
 import { PinoLogger, PinoLoggerOptions } from '../infra/PinoLogger.js';
-import { SQLiteStore } from '../infra/SQLiteStore.js';
-import { SQLiteDurableEventBus } from '../infra/SQLiteDurableEventBus.js';
 import { EventBus } from '../events/EventBus.js';
 import { CheerioParser } from '../infra/CheerioParser.js';
-import { SQLiteMetrics } from '../metrics/SQLiteMetrics.js';
-import { SharedDatabase } from '../utils/SharedDatabase.js';
+import { SharedDatabase } from '../infra/SharedDatabase.js';
 
 export class CoreServiceProvider extends ServiceProvider {
     register(): void {
@@ -18,7 +14,7 @@ export class CoreServiceProvider extends ServiceProvider {
             const options = app.bound('LoggerOptions')
                 ? app.make('LoggerOptions')
                 : {};
-            return new PinoLogger(options);
+            return new PinoLogger({ ...options, dataDir: app.make('DataPaths').ensureDataDir() });
         });
 
         this.app.singleton('IFetcher', () => {
@@ -26,22 +22,20 @@ export class CoreServiceProvider extends ServiceProvider {
         });
 
         // Shared SQLite connection for low-contention services
-        this.app.singleton('SharedDatabase', () => new SharedDatabase());
+        this.app.singleton('SharedDatabase', (app) => new SharedDatabase(app.make('DataPaths').getDbPath('shared.sqlite')));
 
         this.app.singleton('IStore', (app) => {
             const shared = app.make('SharedDatabase');
-            const store = new SQLiteStore(shared.db);
-            store.startSweeper();
+            const store = shared.createStore();
             return store;
         });
 
         this.app.singleton('BundleManager', (app) => new BundleManager(app));
 
-        this.app.singleton('IMutex', () => new SQLiteMutex());
+        this.app.singleton('IMutex', (app) => new SQLiteMutex('locks.sqlite', (file) => app.make('DataPaths').getDbPath(file)));
         this.app.singleton('IScheduler', (app) => {
             const timezone = process.env.GEARS_TIMEZONE || undefined;
-            const shared = app.make('SharedDatabase') as { db: import('better-sqlite3').Database };
-            return new CronScheduler(app.make('IMutex'), app.make('ILogger'), { timezone, db: shared.db });
+            return app.make('SharedDatabase').createScheduler(app.make('IMutex'), app.make('ILogger'), timezone);
         });
 
         this.app.singleton('IEventBus', (app) => new EventBus(app));
@@ -50,7 +44,7 @@ export class CoreServiceProvider extends ServiceProvider {
 
         this.app.singleton('IDurableEventBus', (app) => {
             const shared = app.make('SharedDatabase');
-            const bus = new SQLiteDurableEventBus(shared.db);
+            const bus = shared.createDurableEventBus();
             bus.startPolling();
             return bus;
         });
@@ -61,7 +55,7 @@ export class CoreServiceProvider extends ServiceProvider {
         // Metrics
         this.app.singleton('IMetrics', (app) => {
             const shared = app.make('SharedDatabase');
-            return new SQLiteMetrics(shared.db);
+            return shared.createMetrics();
         });
     }
 

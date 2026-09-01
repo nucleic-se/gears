@@ -27,7 +27,9 @@ export class QueueServiceProvider extends ServiceProvider {
         });
 
         // Register Queue Backend
-        this.app.singleton('IQueue', (app) => new SQLiteQueue('jobs.sqlite', app.make('JobRegistry')));
+        this.app.singleton('IQueue', (app) => new SQLiteQueue(
+            'jobs.sqlite', app.make('JobRegistry'), (file) => app.make('DataPaths').getDbPath(file),
+        ));
 
         // Register Worker factory
 

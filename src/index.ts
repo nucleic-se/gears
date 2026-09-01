@@ -12,12 +12,14 @@ export { SQLiteDurableEventBus } from './core/infra/SQLiteDurableEventBus.js';
 export type { Bundle } from './core/bundle/Bundle.js';
 export type { ServiceMap, ServiceKey } from './core/services.js';
 
-export { getDataDir, ensureDataDir, getDbPath, setDataDir } from './core/utils/paths.js';
+export { DataPaths, getDataDir, ensureDataDir, getDbPath } from './core/utils/paths.js';
+export type { IDataPaths } from './core/utils/paths.js';
 
 import { Container } from './core/container/Container.js';
 import { CoreServiceProvider } from './core/providers/CoreServiceProvider.js';
 import { QueueServiceProvider } from './core/providers/QueueServiceProvider.js';
-import { setDataDir } from './core/utils/paths.js';
+import path from 'path';
+import { DataPaths } from './core/utils/paths.js';
 
 export interface BootOptions {
     dataDir?: string;
@@ -33,9 +35,8 @@ export async function boot(containerOrOptions?: Container | BootOptions, maybeOp
     const app = containerOrOptions instanceof Container ? containerOrOptions : new Container();
     const options = containerOrOptions instanceof Container ? maybeOptions : containerOrOptions;
 
-    if (options?.dataDir) {
-        setDataDir(options.dataDir);
-    }
+    const dataDir = path.resolve(options?.dataDir ?? process.env.GEARS_DATA_DIR ?? path.resolve(process.cwd(), '.gears'));
+    app.singleton('DataPaths', () => new DataPaths(dataDir));
 
     const providers = [
         new CoreServiceProvider(app),

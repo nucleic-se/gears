@@ -3,6 +3,7 @@ import { ILogger, IScheduler, IMutex, IFetcher, IHtmlParser, IStore, IMetrics } 
 import { IQueue, IJobRegistry, JobHandler } from './queue/interfaces.js';
 import { IEventBus, IDurableEventBus } from './events/interfaces.js';
 import { IScheduledJobRegistrar } from './schedule/interfaces.js';
+import { IDataPaths } from './utils/paths.js';
 
 /** Lean container contracts. Concrete infrastructure must not leak through ServiceMap. */
 export interface WorkerOptions {
@@ -32,8 +33,10 @@ export interface IBundleManager {
 }
 
 export interface ISharedDatabase {
-    /** Internal database handle shared by Gears' SQLite adapters. */
-    readonly db: any;
+    createStore(): IStore;
+    createScheduler(mutex: IMutex, logger: ILogger, timezone?: string): IScheduler;
+    createDurableEventBus(): IDurableEventBus;
+    createMetrics(): IMetrics;
     close(): void;
     dispose(): void;
 }
@@ -41,6 +44,7 @@ export interface ISharedDatabase {
 export interface ServiceMap {
     // Core Services
     'ILogger': ILogger;
+    'DataPaths': IDataPaths;
     'LoggerOptions': any;
     'IQueue': IQueue;
     'IStore': IStore;

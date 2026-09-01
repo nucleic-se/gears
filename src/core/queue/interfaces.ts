@@ -40,7 +40,13 @@ export class JobClaimLostError extends Error {
     }
 }
 
-export type JobHandler<T = any> = (job: Job<T>, context?: JobExecutionContext) => Promise<void>;
+/**
+ * Queue delivery is at-least-once. Handlers must observe context.signal and
+ * make external effects idempotent or fence them in an application ledger.
+ * Non-cooperative effectful work belongs in a killable child process; an
+ * in-process Worker cannot safely reap arbitrary JavaScript after claim loss.
+ */
+export type JobHandler<T = any> = (job: Job<T>, context: JobExecutionContext) => Promise<void>;
 
 export interface IQueue {
     add(type: string, payload: any, options?: JobOptions): Promise<Job>;

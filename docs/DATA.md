@@ -1,6 +1,8 @@
 # Data Layout
 
-Gears stores SQLite databases under `GEARS_DATA_DIR`.
+Each Gears container owns one immutable data root. `boot({ dataDir })` takes
+precedence over `GEARS_DATA_DIR`; changing or booting another container cannot
+redirect services already registered in the first container.
 
 ## Default
 If `GEARS_DATA_DIR` is not set, it defaults to `./.gears`.
@@ -21,3 +23,7 @@ The database bundle uses:
 - default `app.sqlite`
 
 If the value is not absolute, it is resolved inside `GEARS_DATA_DIR`.
+
+The shared SQLite connection is private infrastructure. Store, scheduler,
+durable-event, and metrics consumers receive narrow service interfaces and cannot
+execute SQL or close the connection behind one another.

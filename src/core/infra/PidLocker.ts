@@ -5,8 +5,8 @@ import { getDbPath } from '../utils/paths.js';
 export class PidLocker {
     private lockPath: string;
 
-    constructor(lockFile: string = 'worker.pid') {
-        this.lockPath = getDbPath(lockFile);
+    constructor(lockFile: string = 'worker.pid', resolvePath: (file: string) => string = getDbPath) {
+        this.lockPath = resolvePath(lockFile);
     }
 
     /**

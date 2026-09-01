@@ -1,5 +1,4 @@
 import { ServiceProvider } from '../../core/container/ServiceProvider.js';
-import { getDbPath } from '../../core/utils/paths.js';
 import Database from 'better-sqlite3';
 import { Kysely, SqliteDialect, sql } from 'kysely';
 
@@ -10,7 +9,7 @@ export class DatabaseServiceProvider extends ServiceProvider {
         const app = this.app;
 
         const dbPath = process.env.GEARS_APP_DB_PATH || 'app.sqlite';
-        const fullPath = getDbPath(dbPath);
+        const fullPath = app.make('DataPaths').getDbPath(dbPath);
         const nativeDb = new Database(fullPath);
         nativeDb.pragma('journal_mode = WAL');
         nativeDb.pragma('busy_timeout = 5000');

@@ -9,9 +9,10 @@ export class SQLiteQueue implements IQueue {
 
     constructor(
         dbPath: string = 'jobs.sqlite',
-        private jobRegistry?: IJobRegistry
+        private jobRegistry?: IJobRegistry,
+        resolvePath: (file: string) => string = getDbPath,
     ) {
-        const fullPath = getDbPath(dbPath);
+        const fullPath = resolvePath(dbPath);
         this.db = new Database(fullPath);
         this.init();
     }

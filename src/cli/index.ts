@@ -94,7 +94,7 @@ program
 
         // PID Locking
         const { PidLocker } = await import('../core/infra/PidLocker.js');
-        const pidLocker = new PidLocker();
+        const pidLocker = new PidLocker('worker.pid', (file) => app.make('DataPaths').getDbPath(file));
         try {
             pidLocker.acquire();
             logger.debug('Acquired PID lock');
@@ -285,7 +285,7 @@ program
 
         // 3. Worker Status
         const { PidLocker } = await import('../core/infra/PidLocker.js');
-        const pidLocker = new PidLocker();
+        const pidLocker = new PidLocker('worker.pid', (file) => app.make('DataPaths').getDbPath(file));
         try {
             // Try to acquire. If it fails, worker is running.
             pidLocker.acquire();
@@ -417,7 +417,10 @@ function registerBundleCommands(
             // If user didn't override and command prefers a mode (e.g. tui), use it.
             if (!userSpecifiedMode && preferredMode) {
                 const { PinoLogger } = await import('../core/infra/PinoLogger.js');
-                app.singleton('ILogger', () => new PinoLogger({ mode: preferredMode }));
+                app.singleton('ILogger', (container) => new PinoLogger({
+                    mode: preferredMode,
+                    dataDir: container.make('DataPaths').ensureDataDir(),
+                }));
                 app.singleton('LoggerOptions', () => ({ mode: preferredMode }));
             }
             await bootBundle();

@@ -6,6 +6,7 @@ import { ensureDataDir } from '../utils/paths.js';
 export interface PinoLoggerOptions {
     mode?: OutputMode;
     debug?: boolean; // Enable debug level
+    dataDir?: string;
 }
 
 type OwnedLogStream = pino.DestinationStream & NodeJS.EventEmitter & {
@@ -52,7 +53,7 @@ export class PinoLogger implements ILogger {
 
         // File stream (Always) - ensure data dir exists
         try {
-            const dataDir = ensureDataDir();
+            const dataDir = options.dataDir ?? ensureDataDir();
             const fileStream = pino.destination(path.join(dataDir, 'app.log'));
             this.ownedStreams.push(fileStream);
             streams.push({ stream: fileStream });
