@@ -30,6 +30,14 @@ export interface JobExecutionContext {
     signal: AbortSignal;
 }
 
+/** The processing attempt no longer owns the durable queue claim. */
+export class JobClaimLostError extends Error {
+    constructor(jobId: string) {
+        super(`Queue claim lost for job ${jobId}`);
+        this.name = 'JobClaimLostError';
+    }
+}
+
 export type JobHandler<T = any> = (job: Job<T>, context?: JobExecutionContext) => Promise<void>;
 
 export interface IQueue {

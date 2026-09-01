@@ -158,4 +158,28 @@ describe('Worker Reliability', () => {
         expect(observedAbort).toBe(true);
         expect(lateSideEffect).toBe(false);
     });
+
+    it('does not retry a timed-out non-cooperative handler', async () => {
+        const handlers = new Map();
+        let starts = 0;
+        handlers.set('non_cooperative_timeout', async () => {
+            starts += 1;
+            await new Promise(resolve => setTimeout(resolve, 100));
+        });
+        container.bind('JobHandlers', () => handlers);
+
+        worker = new Worker(queue, container, { pollInterval: 5 });
+        worker.start();
+        const job = await queue.add('non_cooperative_timeout', {}, {
+            executionTimeoutMs: 20,
+            maxRetries: 5,
+            backoffBase: 1,
+        });
+
+        await new Promise(resolve => setTimeout(resolve, 180));
+        const persisted = await queue.get(job.id);
+        expect(persisted?.status).toBe('failed');
+        expect(persisted?.attempts).toBe(0);
+        expect(starts).toBe(1);
+    });
 });

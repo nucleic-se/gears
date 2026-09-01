@@ -26,7 +26,8 @@ export class ScheduledJobRegistrar implements IScheduledJobRegistrar {
         this.definitions.set(normalized.id, normalized as ScheduledJobDefinition<unknown>);
         this.scheduler.schedule(
             normalized.cron,
-            async () => {
+            async (context) => {
+                if (context?.signal.aborted) return;
                 const scheduledFor = this.now();
                 scheduledFor.setMilliseconds(0);
                 const occurrence: ScheduledOccurrence = {
@@ -38,6 +39,7 @@ export class ScheduledJobRegistrar implements IScheduledJobRegistrar {
                     occurrence,
                     payload: structuredClone(normalized.payload),
                 };
+                if (context?.signal.aborted) return;
                 await this.queue.add(normalized.jobType, envelope, normalized.jobOptions);
             },
             normalized.id,

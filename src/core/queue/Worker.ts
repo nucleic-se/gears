@@ -1,5 +1,5 @@
 import { Container } from '../container/Container.js';
-import { IQueue, Job, JobHandler } from './interfaces.js';
+import { IQueue, Job, JobClaimLostError, JobHandler } from './interfaces.js';
 import { JobValidationError } from './JobRegistry.js';
 import { ILogger } from '../interfaces.js';
 
@@ -195,6 +195,8 @@ export class Worker {
         const executionTimeoutMs = job.options?.executionTimeoutMs ?? this.defaultExecutionTimeoutMs;
 
         let heartbeatTimer: NodeJS.Timeout | null = null;
+        const controller = new AbortController();
+        let claimLost = false;
 
         if (heartbeatIntervalMs >= stuckTimeoutMs) {
             this.logger.warn(`Heartbeat interval is >= stuck timeout`, {
@@ -205,14 +207,19 @@ export class Worker {
         }
 
         if (heartbeatIntervalMs > 0) {
-            heartbeatTimer = setInterval(async () => {
+            const heartbeat = async () => {
                 try {
                     await this.queue.heartbeat(job.id, job.claimToken ?? undefined);
                 } catch (e) {
                     const message = e instanceof Error ? e.message : String(e);
                     this.logger.warn(`Heartbeat failed`, { jobId: job.id, error: message });
+                    claimLost = true;
+                    controller.abort(new JobClaimLostError(job.id));
+                    return;
                 }
-            }, heartbeatIntervalMs);
+                heartbeatTimer = setTimeout(heartbeat, heartbeatIntervalMs);
+            };
+            heartbeatTimer = setTimeout(heartbeat, heartbeatIntervalMs);
         }
 
         try {
@@ -233,7 +240,9 @@ export class Worker {
             // Execute handler with optional timeout
             // Default to 5 minutes if not specified (0 in options means disabled, but we enforce a global default here for safety)
             const effectiveTimeoutMs = executionTimeoutMs > 0 ? executionTimeoutMs : 300_000;
-            await this.executeHandler(handler, job, effectiveTimeoutMs);
+            await this.executeHandler(handler, job, effectiveTimeoutMs, controller);
+
+            if (claimLost) throw new JobClaimLostError(job.id);
 
             try {
                 await this.queue.complete(job.id, job.claimToken ?? undefined);
@@ -250,10 +259,22 @@ export class Worker {
             const msg = err instanceof Error ? err.message : String(err);
             const stack = err instanceof Error ? err.stack : undefined;
 
+            if (err instanceof JobClaimLostError || claimLost) {
+                this.logger.warn(`Stopped processing after queue claim loss`, {
+                    jobId: job.id,
+                    type: job.type,
+                });
+                return;
+            }
+
             const maxRetries = job.options?.maxRetries ?? 3;
             const backoff = job.options?.backoffBase ?? 1000;
 
-            if (job.attempts < maxRetries && !(err instanceof JobValidationError)) {
+            if (
+                job.attempts < maxRetries
+                && !(err instanceof JobValidationError)
+                && !(err instanceof JobExecutionTimeoutError)
+            ) {
                 const delay = backoff * Math.pow(2, job.attempts);
                 this.logger.warn(`Job failed, retrying`, {
                     jobId: job.id,
@@ -294,10 +315,19 @@ export class Worker {
         }
     }
 
-    private async executeHandler(handler: JobHandler, job: Job, timeoutMs: number): Promise<void> {
-        const controller = new AbortController();
+    private async executeHandler(
+        handler: JobHandler,
+        job: Job,
+        timeoutMs: number,
+        controller: AbortController,
+    ): Promise<void> {
         let timeoutTimer: NodeJS.Timeout | undefined;
-        const timeoutError = new Error(`Timeout: Job exceeded ${timeoutMs}ms`);
+        const timeoutError = new JobExecutionTimeoutError(timeoutMs);
+        const abortPromise = new Promise<never>((_, reject) => {
+            controller.signal.addEventListener('abort', () => {
+                reject(controller.signal.reason ?? new JobClaimLostError(job.id));
+            }, { once: true });
+        });
 
         const timeoutPromise = new Promise<never>((_, reject) => {
             timeoutTimer = setTimeout(() => {
@@ -311,9 +341,17 @@ export class Worker {
             await Promise.race([
                 handler(job, { signal: controller.signal }),
                 timeoutPromise,
+                abortPromise,
             ]);
         } finally {
             if (timeoutTimer) clearTimeout(timeoutTimer);
         }
+    }
+}
+
+class JobExecutionTimeoutError extends Error {
+    constructor(timeoutMs: number) {
+        super(`Timeout: Job exceeded ${timeoutMs}ms`);
+        this.name = 'JobExecutionTimeoutError';
     }
 }

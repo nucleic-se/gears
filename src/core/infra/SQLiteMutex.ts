@@ -26,10 +26,9 @@ export class SQLiteMutex implements IMutex {
       )
     `);
 
-        try {
+        const columns = this.db.pragma('table_info(locks)') as Array<{ name: string }>;
+        if (!columns.some(({ name }) => name === 'owner_id')) {
             this.db.prepare('ALTER TABLE locks ADD COLUMN owner_id TEXT').run();
-        } catch {
-            // Column already exists.
         }
 
         // Clear any legacy rows without an owner to avoid unsafe refresh/release behavior.

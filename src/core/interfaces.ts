@@ -41,7 +41,7 @@ export interface IScheduler {
      */
     schedule(
         expression: string,
-        task: () => void | Promise<void>,
+        task: (context?: { signal: AbortSignal }) => void | Promise<void>,
         jobName: string,
         options?: { lockTtlMs?: number }
     ): void;

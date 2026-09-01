@@ -90,7 +90,7 @@ export class CronScheduler implements IScheduler, IDisposable {
 
     schedule(
         expression: string,
-        task: () => void | Promise<void>,
+        task: (context?: { signal: AbortSignal }) => void | Promise<void>,
         jobName: string,
         options?: { lockTtlMs?: number }
     ): void {
@@ -128,6 +128,7 @@ export class CronScheduler implements IScheduler, IDisposable {
                     const refreshIntervalMs = Math.max(1000, Math.floor(lockTtlMs / 2));
                     let refreshTimer: NodeJS.Timeout | null = null;
                     let refreshActive = true;
+                    const controller = new AbortController();
 
                     const scheduleRefresh = () => {
                         if (!refreshActive) {
@@ -142,10 +143,14 @@ export class CronScheduler implements IScheduler, IDisposable {
                                 if (!refreshed) {
                                     this.logger.warn(`Lost distributed lock`, { job: jobName });
                                     refreshActive = false;
+                                    controller.abort(new Error(`Distributed lock lost for ${jobName}`));
                                     return;
                                 }
                             } catch (e) {
                                 this.logger.error(`Failed to refresh lock`, { job: jobName, error: e });
+                                refreshActive = false;
+                                controller.abort(e);
+                                return;
                             }
                             scheduleRefresh();
                         }, refreshIntervalMs);
@@ -154,7 +159,7 @@ export class CronScheduler implements IScheduler, IDisposable {
                     scheduleRefresh();
 
                     try {
-                        await task();
+                        await task({ signal: controller.signal });
                     } catch (e) {
                         this.logger.error(`Task failed`, { job: jobName, error: e });
                     } finally {

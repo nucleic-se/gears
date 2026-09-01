@@ -110,7 +110,9 @@ describe('CronScheduler Refresh', () => {
         let finishTask: () => void;
         const taskRunning = new Promise<void>(r => finishTask = r);
 
-        scheduler.schedule('* * * * *', async () => {
+        let aborted = false;
+        scheduler.schedule('* * * * *', async (context) => {
+            context?.signal.addEventListener('abort', () => { aborted = true; }, { once: true });
             await taskRunning;
         }, 'lost-lock-job', { lockTtlMs: 2000 });
 
@@ -121,6 +123,7 @@ describe('CronScheduler Refresh', () => {
         await vi.advanceTimersByTimeAsync(1000);
         expect(mutex.refresh).toHaveBeenCalledTimes(1);
         expect(logger.warn).toHaveBeenCalledWith('Lost distributed lock', { job: 'lost-lock-job' });
+        expect(aborted).toBe(true);
 
         await vi.advanceTimersByTimeAsync(2000);
         expect(mutex.refresh).toHaveBeenCalledTimes(1);
@@ -129,7 +132,7 @@ describe('CronScheduler Refresh', () => {
         await runPromise;
     });
 
-    it('should keep refreshing after transient refresh errors', async () => {
+    it('should fail closed after a refresh error', async () => {
         const mutex = new MockMutex();
         let refreshCalls = 0;
         mutex.refresh = vi.fn().mockImplementation(async () => {
@@ -146,7 +149,9 @@ describe('CronScheduler Refresh', () => {
         let finishTask: () => void;
         const taskRunning = new Promise<void>(r => finishTask = r);
 
-        scheduler.schedule('* * * * *', async () => {
+        let aborted = false;
+        scheduler.schedule('* * * * *', async (context) => {
+            context?.signal.addEventListener('abort', () => { aborted = true; }, { once: true });
             await taskRunning;
         }, 'refresh-error-job', { lockTtlMs: 2000 });
 
@@ -159,7 +164,8 @@ describe('CronScheduler Refresh', () => {
         expect(logger.error).toHaveBeenCalledWith('Failed to refresh lock', { job: 'refresh-error-job', error: expect.any(Error) });
 
         await vi.advanceTimersByTimeAsync(1000);
-        expect(mutex.refresh).toHaveBeenCalledTimes(2);
+        expect(mutex.refresh).toHaveBeenCalledTimes(1);
+        expect(aborted).toBe(true);
 
         finishTask!();
         await runPromise;

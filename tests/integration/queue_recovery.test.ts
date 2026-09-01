@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { SQLiteQueue } from '../../src/core/queue/SQLiteQueue.js';
+import { JobClaimLostError } from '../../src/core/queue/interfaces.js';
 import path from 'path';
 import fs from 'fs/promises';
 import { fileURLToPath } from 'url';
@@ -95,20 +96,55 @@ describe('Queue Recovery', () => {
 
         const beforeStaleHeartbeat = (await queue.get(secondClaim.id))?.updated_at;
         await new Promise((resolve) => setTimeout(resolve, 5));
-        await queue.heartbeat(secondClaim.id, firstClaim.claimToken);
+        await expect(queue.heartbeat(secondClaim.id, firstClaim.claimToken))
+            .rejects.toBeInstanceOf(JobClaimLostError);
         expect((await queue.get(secondClaim.id))?.updated_at).toBe(beforeStaleHeartbeat);
 
-        await queue.retry(secondClaim.id, 0, 'stale retry', firstClaim.claimToken);
+        await expect(queue.retry(secondClaim.id, 0, 'stale retry', firstClaim.claimToken))
+            .rejects.toBeInstanceOf(JobClaimLostError);
         expect((await queue.get(secondClaim.id))?.status).toBe('processing');
-        await queue.fail(secondClaim.id, 'stale failure', firstClaim.claimToken);
+        await expect(queue.fail(secondClaim.id, 'stale failure', firstClaim.claimToken))
+            .rejects.toBeInstanceOf(JobClaimLostError);
         expect((await queue.get(secondClaim.id))?.status).toBe('processing');
-        await queue.release(secondClaim.id, firstClaim.claimToken);
+        await expect(queue.release(secondClaim.id, firstClaim.claimToken))
+            .rejects.toBeInstanceOf(JobClaimLostError);
         expect((await queue.get(secondClaim.id))?.status).toBe('processing');
-        await queue.complete(secondClaim.id, firstClaim.claimToken);
+        await expect(queue.complete(secondClaim.id, firstClaim.claimToken))
+            .rejects.toBeInstanceOf(JobClaimLostError);
         expect((await queue.get(secondClaim.id))?.status).toBe('processing');
 
         await queue.complete(secondClaim.id, secondClaim.claimToken);
         expect((await queue.get(secondClaim.id))?.status).toBe('completed');
+    });
+
+    it('charges crash recovery to retry budget and eventually fails', async () => {
+        const added = await queue.add('crash-loop', {}, { maxRetries: 1 });
+        const first = await queue.pop();
+        expect(first?.id).toBe(added.id);
+
+        const Database = (await import('better-sqlite3')).default;
+        const db = new Database(TEST_DB_PATH);
+        db.prepare('UPDATE jobs SET updated_at = 0 WHERE id = ?').run(added.id);
+        expect(await queue.recover(1)).toBe(1);
+        expect((await queue.get(added.id))?.attempts).toBe(1);
+
+        await queue.pop();
+        db.prepare('UPDATE jobs SET updated_at = 0 WHERE id = ?').run(added.id);
+        expect(await queue.recover(1)).toBe(0);
+        const exhausted = await queue.get(added.id);
+        expect(exhausted?.status).toBe('failed');
+        expect(exhausted?.attempts).toBe(1);
+        db.close();
+    });
+
+    it('refuses a queue database created by a newer schema', async () => {
+        await queue.close();
+        const Database = (await import('better-sqlite3')).default;
+        const db = new Database(TEST_DB_PATH);
+        db.prepare('UPDATE _schema_version SET version = 999').run();
+        db.close();
+
+        expect(() => new SQLiteQueue(TEST_DB_PATH)).toThrow('newer than supported');
     });
 
     it('migrates a version 3 queue schema with a nullable claim token', async () => {

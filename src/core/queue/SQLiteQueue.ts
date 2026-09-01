@@ -1,5 +1,5 @@
 import Database from 'better-sqlite3';
-import { IJobRegistry, IQueue, Job, JobOptions } from './interfaces.js';
+import { IJobRegistry, IQueue, Job, JobClaimLostError, JobOptions } from './interfaces.js';
 import { randomUUID } from 'crypto';
 import { getDbPath } from '../utils/paths.js';
 import { JobValidationError } from './JobRegistry.js';
@@ -52,13 +52,11 @@ export class SQLiteQueue implements IQueue {
                 `);
 
                 // Ensure columns exist (Idempotent)
-                const addColumn = (sql: string) => { try { db.exec(sql); } catch (e) { } };
-
-                addColumn('ALTER TABLE jobs ADD COLUMN scheduled_at INTEGER');
-                addColumn('ALTER TABLE jobs ADD COLUMN attempts INTEGER DEFAULT 0');
-                addColumn("ALTER TABLE jobs ADD COLUMN options TEXT DEFAULT '{}'");
-                addColumn('ALTER TABLE jobs ADD COLUMN stuck_timeout_ms INTEGER');
-                addColumn('ALTER TABLE jobs ADD COLUMN priority INTEGER DEFAULT 0');
+                this.addColumnIfMissing(db, 'jobs', 'scheduled_at', 'INTEGER');
+                this.addColumnIfMissing(db, 'jobs', 'attempts', 'INTEGER DEFAULT 0');
+                this.addColumnIfMissing(db, 'jobs', 'options', "TEXT DEFAULT '{}'");
+                this.addColumnIfMissing(db, 'jobs', 'stuck_timeout_ms', 'INTEGER');
+                this.addColumnIfMissing(db, 'jobs', 'priority', 'INTEGER DEFAULT 0');
 
                 // Data fixups
                 db.exec('UPDATE jobs SET attempts = 0 WHERE attempts IS NULL');
@@ -69,13 +67,11 @@ export class SQLiteQueue implements IQueue {
             },
             // Version 2: Job TTL support
             (db: Database.Database) => {
-                const addColumn = (sql: string) => { try { db.exec(sql); } catch (e) { } };
-                addColumn('ALTER TABLE jobs ADD COLUMN expires_at INTEGER');
+                this.addColumnIfMissing(db, 'jobs', 'expires_at', 'INTEGER');
             },
             // Version 3: Named jobs (bump/debounce support)
             (db: Database.Database) => {
-                const addColumn = (sql: string) => { try { db.exec(sql); } catch (e) { } };
-                addColumn('ALTER TABLE jobs ADD COLUMN name TEXT');
+                this.addColumnIfMissing(db, 'jobs', 'name', 'TEXT');
                 // SQLite allows multiple NULLs in a UNIQUE index, so non-partial is safe here.
                 // ON CONFLICT(name) in INSERT upserts requires a non-partial unique index.
                 db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_name ON jobs(name)');
@@ -91,6 +87,15 @@ export class SQLiteQueue implements IQueue {
             },
         ];
 
+        if (!Number.isInteger(currentVersion) || currentVersion < 0) {
+            throw new Error(`Invalid queue schema version: ${String(currentVersion)}`);
+        }
+        if (currentVersion > migrations.length) {
+            throw new Error(
+                `Queue schema version ${currentVersion} is newer than supported version ${migrations.length}`,
+            );
+        }
+
         // 4. Run Migrations
         for (let i = currentVersion; i < migrations.length; i++) {
             const version = i + 1;
@@ -103,6 +108,18 @@ export class SQLiteQueue implements IQueue {
             })();
 
             // Log migration? this.logger.info(...) unfortunately we don't have logger here easily unless injected
+        }
+    }
+
+    private addColumnIfMissing(
+        db: Database.Database,
+        table: string,
+        column: string,
+        definition: string,
+    ): void {
+        const columns = db.pragma(`table_info(${table})`) as Array<{ name: string }>;
+        if (!columns.some(({ name }) => name === column)) {
+            db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
         }
     }
 
@@ -341,7 +358,8 @@ export class SQLiteQueue implements IQueue {
               AND (? IS NULL OR claim_token = ?)
         `);
         const now = Date.now();
-        stmt.run(now, now + delayMs, lastError || null, jobId, claimToken ?? null, claimToken ?? null);
+        const result = stmt.run(now, now + delayMs, lastError || null, jobId, claimToken ?? null, claimToken ?? null);
+        this.assertClaimTransition(jobId, claimToken, result.changes);
     }
 
     async pop(): Promise<Job | null> {
@@ -447,7 +465,8 @@ export class SQLiteQueue implements IQueue {
             WHERE id = ? AND status = 'processing'
               AND (? IS NULL OR claim_token = ?)
         `);
-        stmt.run(Date.now(), jobId, claimToken ?? null, claimToken ?? null);
+        const result = stmt.run(Date.now(), jobId, claimToken ?? null, claimToken ?? null);
+        this.assertClaimTransition(jobId, claimToken, result.changes);
     }
 
     async complete(jobId: string, claimToken?: string): Promise<void> {
@@ -457,7 +476,8 @@ export class SQLiteQueue implements IQueue {
       WHERE id = ? AND status = 'processing'
         AND (? IS NULL OR claim_token = ?)
     `);
-        stmt.run(Date.now(), jobId, claimToken ?? null, claimToken ?? null);
+        const result = stmt.run(Date.now(), jobId, claimToken ?? null, claimToken ?? null);
+        this.assertClaimTransition(jobId, claimToken, result.changes);
     }
 
     async fail(jobId: string, error: string, claimToken?: string): Promise<void> {
@@ -467,7 +487,8 @@ export class SQLiteQueue implements IQueue {
         WHERE id = ? AND status = 'processing'
           AND (? IS NULL OR claim_token = ?)
         `);
-        stmt.run(Date.now(), error, jobId, claimToken ?? null, claimToken ?? null);
+        const result = stmt.run(Date.now(), error, jobId, claimToken ?? null, claimToken ?? null);
+        this.assertClaimTransition(jobId, claimToken, result.changes);
     }
 
     async heartbeat(jobId: string, claimToken?: string): Promise<void> {
@@ -477,7 +498,8 @@ export class SQLiteQueue implements IQueue {
         WHERE id = ? AND status = 'processing'
           AND (? IS NULL OR claim_token = ?)
         `);
-        stmt.run(Date.now(), jobId, claimToken ?? null, claimToken ?? null);
+        const result = stmt.run(Date.now(), jobId, claimToken ?? null, claimToken ?? null);
+        this.assertClaimTransition(jobId, claimToken, result.changes);
     }
 
     async recover(timeoutMs: number): Promise<number> {
@@ -503,15 +525,28 @@ export class SQLiteQueue implements IQueue {
         `);
         failExpiredPending.run(now, now);
 
-        // Then requeue non-expired stuck jobs as before
-        const stmt = this.db.prepare(`
+        // A recovered attempt consumed retry budget: the prior process may have
+        // executed effects before crashing, so recovery must not create infinite retries.
+        const recoverable = this.db.prepare(`
             UPDATE jobs
-            SET status = 'pending', updated_at = ?, claim_token = NULL
+            SET status = 'pending', updated_at = ?, attempts = COALESCE(attempts, 0) + 1,
+                error = 'Worker disappeared while processing', claim_token = NULL
             WHERE status = 'processing'
               AND updated_at < (? - COALESCE(stuck_timeout_ms, ?))
+              AND COALESCE(attempts, 0) < COALESCE(json_extract(options, '$.maxRetries'), 3)
         `);
-        const result = stmt.run(now, now, timeoutMs);
-        return result.changes;
+        const recovered = recoverable.run(now, now, timeoutMs);
+
+        this.db.prepare(`
+            UPDATE jobs
+            SET status = 'failed', updated_at = ?,
+                error = 'Worker disappeared and retry budget is exhausted', claim_token = NULL
+            WHERE status = 'processing'
+              AND updated_at < (? - COALESCE(stuck_timeout_ms, ?))
+              AND COALESCE(attempts, 0) >= COALESCE(json_extract(options, '$.maxRetries'), 3)
+        `).run(now, now, timeoutMs);
+
+        return recovered.changes;
     }
 
     async clear(status: Job['status'], type?: string): Promise<number> {
@@ -563,5 +598,11 @@ export class SQLiteQueue implements IQueue {
 
     async close(): Promise<void> {
         this.db.close();
+    }
+
+    private assertClaimTransition(jobId: string, claimToken: string | undefined, changes: number): void {
+        if (claimToken !== undefined && changes !== 1) {
+            throw new JobClaimLostError(jobId);
+        }
     }
 }
