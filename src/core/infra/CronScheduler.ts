@@ -87,6 +87,8 @@ export class CronScheduler implements IScheduler, IDisposable {
     }
 
     private runningJobs: Set<string> = new Set();
+    private controllers = new Set<AbortController>();
+    private disposed = false;
 
     schedule(
         expression: string,
@@ -94,6 +96,7 @@ export class CronScheduler implements IScheduler, IDisposable {
         jobName: string,
         options?: { lockTtlMs?: number }
     ): void {
+        if (this.disposed) throw new Error('Scheduler is disposed');
         if (!cron.validate(expression)) {
             throw new Error(`Invalid cron expression: ${expression}`);
         }
@@ -106,7 +109,8 @@ export class CronScheduler implements IScheduler, IDisposable {
         const wasDormant = this.dormant.has(jobName);
         this.dormant.delete(jobName);
 
-        const scheduledTask = cron.schedule(expression, async () => {
+        const scheduledTask = cron.schedule(expression, async (tick) => {
+            if (this.disposed) return;
             // 0. Check Single-Flight (Re-entrancy Guard)
             if (this.runningJobs.has(jobName)) {
                 this.logger.debug(`Skipped (previous run still active)`, { job: jobName });
@@ -117,18 +121,19 @@ export class CronScheduler implements IScheduler, IDisposable {
             const lockKey = `job:${jobName}`;
 
             this.runningJobs.add(jobName);
+            const controller = new AbortController();
+            this.controllers.add(controller);
 
             // 2. Try to acquire lock (TTL 10 minutes default)
             try {
                 const lockTtlMs = options?.lockTtlMs ?? this.defaultLockTtlMs;
-                const acquired = await this.mutex.acquire(lockKey, lockTtlMs);
+                const acquired = await this.mutex.acquire(lockKey, lockTtlMs, (tick?.date ?? new Date()).getTime());
 
                 if (acquired) {
                     this.logger.debug(`Acquired distributed lock`, { job: jobName });
                     const refreshIntervalMs = Math.max(1000, Math.floor(lockTtlMs / 2));
                     let refreshTimer: NodeJS.Timeout | null = null;
                     let refreshActive = true;
-                    const controller = new AbortController();
 
                     const scheduleRefresh = () => {
                         if (!refreshActive) {
@@ -159,7 +164,7 @@ export class CronScheduler implements IScheduler, IDisposable {
                     scheduleRefresh();
 
                     try {
-                        await task({ signal: controller.signal });
+                        if (!controller.signal.aborted) await task({ signal: controller.signal });
                     } catch (e) {
                         this.logger.error(`Task failed`, { job: jobName, error: e });
                     } finally {
@@ -177,6 +182,7 @@ export class CronScheduler implements IScheduler, IDisposable {
                 this.logger.error(`Mutex error`, { job: jobName, error: e });
             } finally {
                 this.runningJobs.delete(jobName);
+                this.controllers.delete(controller);
             }
         }, { timezone: this.timezone });
 
@@ -248,23 +254,29 @@ export class CronScheduler implements IScheduler, IDisposable {
     }
 
     async dispose(): Promise<void> {
+        this.disposed = true;
         if (this.orphanTimer) {
             clearTimeout(this.orphanTimer);
         }
 
         this.stopAll();
 
-        // Wait for running jobs to drain
-        if (this.runningJobs.size > 0) {
-            this.logger.info(`Waiting for ${this.runningJobs.size} cron jobs to finish...`);
-            const start = Date.now();
-            while (this.runningJobs.size > 0) {
-                if (Date.now() - start > 5000) {
-                    this.logger.warn(`Cron shutdown timed out, ${this.runningJobs.size} jobs still running`);
-                    break;
-                }
-                await new Promise(resolve => setTimeout(resolve, 100));
+        for (const controller of this.controllers) {
+            controller.abort(new Error('Scheduler is stopping'));
+        }
+        const warning = setTimeout(() => {
+            if (this.runningJobs.size > 0) {
+                this.logger.warn(`Cron shutdown is waiting for ${this.runningJobs.size} jobs to settle`);
             }
+        }, 5000);
+        try {
+            // A supervisor must terminate non-cooperative work; closing dependencies
+            // while it is still running would release its locks and invalidate its IO.
+            while (this.runningJobs.size > 0) {
+                await new Promise(resolve => setTimeout(resolve, 10));
+            }
+        } finally {
+            clearTimeout(warning);
         }
     }
 }

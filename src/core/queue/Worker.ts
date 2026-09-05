@@ -355,6 +355,9 @@ export class Worker {
             ]);
         } finally {
             if (timeoutTimer) clearTimeout(timeoutTimer);
+            // Keep the worker slot, queue claim, and heartbeat until work actually stops.
+            // AbortSignal cannot terminate arbitrary in-process JavaScript.
+            await Promise.allSettled([handlerPromise]);
         }
     }
 }

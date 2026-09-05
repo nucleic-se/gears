@@ -15,6 +15,7 @@ import { hardenPrivateDatabaseFiles, validatePrivateDatabasePath } from './priva
 export class SharedDatabase {
     readonly #db: Database.Database;
     readonly #path: string;
+    private stores = new Set<SQLiteStore>();
 
     constructor(fullPath: string) {
         validatePrivateDatabasePath(fullPath);
@@ -28,6 +29,7 @@ export class SharedDatabase {
     createStore(): IStore {
         const store = new SQLiteStore(this.#db);
         store.startSweeper();
+        this.stores.add(store);
         return store;
     }
 
@@ -39,6 +41,8 @@ export class SharedDatabase {
     createMetrics(): IMetrics { return new SQLiteMetrics(this.#db); }
 
     close(): void {
+        for (const store of this.stores) store.close();
+        this.stores.clear();
         if (this.#db.open) this.#db.close();
         hardenPrivateDatabaseFiles(this.#path);
     }

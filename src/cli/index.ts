@@ -10,6 +10,7 @@ import { queueCommands } from '../core/queue/Console/QueueCommands.js';
 import { Bootstrap } from '../core/Bootstrap.js';
 
 const program = new Command();
+const commandApps = new Set<Container>();
 
 program
     .name('gears')
@@ -35,10 +36,12 @@ async function bootWithOptions(): Promise<Container> {
         mode = opts.output as OutputMode;
     }
 
-    return Bootstrap.boot({
+    const app = await Bootstrap.boot({
         mode,
         debug: opts.debug
     });
+    commandApps.add(app);
+    return app;
 }
 
 program
@@ -53,8 +56,8 @@ program
     .action(async (options) => {
         const parsePositiveInt = (value: string | undefined, flagName: string): number | undefined => {
             if (value === undefined) return undefined;
-            const parsed = parseInt(value, 10);
-            if (isNaN(parsed) || parsed < 1) {
+            const parsed = Number(value);
+            if (!Number.isSafeInteger(parsed) || parsed < 1) {
                 throw new Error(`${flagName} must be a positive number`);
             }
             return parsed;
@@ -78,7 +81,9 @@ program
         let recoveryTimeoutMs: number | undefined;
         let recoveryCheckIntervalMs: number | undefined;
         let heartbeatIntervalMs: number | undefined;
+        let timeoutSeconds: number | undefined;
         try {
+            timeoutSeconds = parsePositiveInt(options.timeout, '--timeout');
             pollIntervalMs = parsePositiveInt(options.pollIntervalMs, '--poll-interval-ms');
             recoveryTimeoutMs = parsePositiveInt(options.recoveryTimeoutMs, '--recovery-timeout-ms');
             recoveryCheckIntervalMs = parsePositiveInt(options.recoveryCheckIntervalMs, '--recovery-check-interval-ms');
@@ -104,77 +109,80 @@ program
             return;
         }
 
-        logger.info('Booting worker', { concurrency });
+        try {
+            logger.info('Booting worker', { concurrency });
 
-        // Configure worker options before resolving Worker
-        app.singleton('WorkerOptions', () => ({
-            maxConcurrency: concurrency,
-            ...(pollIntervalMs !== undefined ? { pollInterval: pollIntervalMs } : {}),
-            ...(recoveryTimeoutMs !== undefined ? { recoveryTimeoutMs } : {}),
-            ...(recoveryCheckIntervalMs !== undefined ? { recoveryCheckIntervalMs } : {}),
-            ...(heartbeatIntervalMs !== undefined ? { heartbeatIntervalMs } : {}),
-        }));
+            // Configure worker options before resolving Worker
+            app.singleton('WorkerOptions', () => ({
+                maxConcurrency: concurrency,
+                ...(pollIntervalMs !== undefined ? { pollInterval: pollIntervalMs } : {}),
+                ...(recoveryTimeoutMs !== undefined ? { recoveryTimeoutMs } : {}),
+                ...(recoveryCheckIntervalMs !== undefined ? { recoveryCheckIntervalMs } : {}),
+                ...(heartbeatIntervalMs !== undefined ? { heartbeatIntervalMs } : {}),
+            }));
 
-        // Restore loaded bundles
-        const bundleManager = app.make('BundleManager');
-        await bundleManager.restore();
+            // Restore loaded bundles
+            const bundleManager = app.make('BundleManager');
+            await bundleManager.restore();
 
-        const worker = app.make('Worker');
-        worker.start();
+            const worker = app.make('Worker');
+            worker.start();
 
-        let shuttingDown = false;
+            let shuttingDown = false;
+            let exitTimer: NodeJS.Timeout | undefined;
 
-        const gracefulShutdown = async () => {
-            if (shuttingDown) {
-                logger.warn('Forced exit (second signal)');
-                process.exit(1);
+            const gracefulShutdown = async () => {
+                if (shuttingDown) {
+                    console.error('Forced exit (second signal)');
+                    process.exit(1);
+                }
+                shuttingDown = true;
+                clearTimeout(exitTimer);
+
+                logger.info('Stopping worker...');
+                try {
+                    await worker.stop();
+                } catch (e) {
+                    const message = e instanceof Error ? e.message : String(e);
+                    logger.error('Error stopping worker', { error: message });
+                }
+
+                try {
+                    // Cron callbacks can use bundle services, so drain them before unload.
+                    await app.make('IScheduler').dispose();
+                    // Run bundle-level shutdown hooks before container disposal.
+                    await bundleManager.unloadAll({ persist: false, silent: true });
+                } catch (e) {
+                    const message = e instanceof Error ? e.message : String(e);
+                    logger.error('Error unloading bundles during shutdown', { error: message });
+                }
+
+                try {
+                    logger.info('Worker stopped; disposing services');
+                    // Dispose all singletons after the final runtime log.
+                    await app.shutdown();
+                } catch (e) {
+                    const message = e instanceof Error ? e.message : String(e);
+                    console.error('Error during app shutdown:', message);
+                }
+
+                pidLocker.release();
+                process.exitCode = 0;
+            };
+
+            // Handle graceful shutdown on signals
+            process.on('SIGINT', gracefulShutdown);
+            process.on('SIGTERM', gracefulShutdown);
+
+            if (timeoutSeconds !== undefined) {
+                logger.info('Scheduled graceful exit', { seconds: timeoutSeconds });
+                exitTimer = setTimeout(gracefulShutdown, timeoutSeconds * 1000);
             }
-            shuttingDown = true;
-
-            logger.info('Stopping worker...');
-            try {
-                await worker.stop();
-            } catch (e) {
-                const message = e instanceof Error ? e.message : String(e);
-                logger.error('Error stopping worker', { error: message });
-            }
-
-            try {
-                // Run bundle-level shutdown hooks before container disposal.
-                await bundleManager.unloadAll({ persist: false, silent: true });
-            } catch (e) {
-                const message = e instanceof Error ? e.message : String(e);
-                logger.error('Error unloading bundles during shutdown', { error: message });
-            }
-
-            try {
-                // Dispose all singletons (including AssistantService, CronScheduler, IMutex)
-                await app.shutdown();
-            } catch (e) {
-                const message = e instanceof Error ? e.message : String(e);
-                logger.error('Error during app shutdown', { error: message });
-            }
-
-            pidLocker.release();
-            logger.debug('Released PID lock');
-            logger.info('Worker stopped gracefully');
-            process.exitCode = 0;
-        };
-
-        // Handle graceful shutdown on signals
-        process.on('SIGINT', gracefulShutdown);
-        process.on('SIGTERM', gracefulShutdown);
-
-        // Handle timeout if specified
-        if (options.timeout) {
-            const seconds = parseInt(options.timeout, 10);
-            if (isNaN(seconds) || seconds <= 0) {
-                logger.error('--timeout must be a positive number');
-                process.exitCode = 1;
-                return;
-            }
-            logger.info('Scheduled graceful exit', { seconds });
-            setTimeout(gracefulShutdown, seconds * 1000);
+            // The signal handler owns the long-running worker's lifecycle now.
+            commandApps.delete(app);
+        } catch (error) {
+            try { await app.shutdown(); } finally { pidLocker.release(); }
+            throw error;
         }
     });
 
@@ -329,6 +337,7 @@ program
     .action(async () => {
         const { Bootstrap } = await import('../core/Bootstrap.js');
         const app = await Bootstrap.boot({ mode: 'tui' });
+        commandApps.add(app);
 
         const { topCommand } = await import('./commands/top.js');
         await topCommand(app);
@@ -423,38 +432,24 @@ function registerBundleCommands(
                 }));
                 app.singleton('LoggerOptions', () => ({ mode: preferredMode }));
             }
-            await bootBundle();
-
             try {
+                await bootBundle();
                 const output = new ConsoleOutput();
                 await cmd.action(args, app, output);
 
 
-                // Graceful Shutdown
-                const bundleManager = app.make('BundleManager');
-                const logger = app.make('ILogger');
-                const bundles = bundleManager.getLoadedBundles();
-
-                // 1. Unload bundles (runs bundle.shutdown hook)
-                // We still do this because bundle.shutdown logic might be different from service disposal
-                // (e.g. business logic cleanup vs resource cleanup)
-                for (const record of bundles) {
-                    try {
-                        await bundleManager.unload(record.name, { persist: false, silent: true });
-                    } catch (e) {
-                        const message = e instanceof Error ? e.message : String(e);
-                        logger.warn('Failed to unload bundle during CLI shutdown', { bundle: record.name, error: message });
-                    }
-                }
-
-                // 2. Dispose all singletons (Connection pools, Schedulers, etc)
-                // This is the new centralized disposal
-                await app.shutdown();
                 process.exitCode = 0;
 
             } catch (err) {
                 console.error(err);
                 process.exitCode = 1;
+            } finally {
+                try {
+                    await app.make('IScheduler').dispose();
+                    await app.make('BundleManager').unloadAll({ persist: false, silent: true });
+                } finally {
+                    await app.shutdown();
+                }
             }
         });
     }
@@ -473,6 +468,7 @@ async function main() {
         debug: opts.debug
     });
 
+    commandApps.add(app);
     const bundleManager = app.make('BundleManager');
 
     // Load bundle metadata (no boot, no watch) to discover commands
@@ -536,11 +532,13 @@ async function main() {
         }
     }
 
-    // Graceful shutdown: flush pino before exit
-    try { await app.shutdown(); } catch { /* best-effort */ }
+
 }
 
-main().catch((err) => {
+main().finally(async () => {
+    for (const app of commandApps) await app.shutdown();
+    commandApps.clear();
+}).catch((err) => {
     console.error('Fatal error:', err);
     process.exitCode = 1;
 });

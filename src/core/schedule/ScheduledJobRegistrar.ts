@@ -23,7 +23,6 @@ export class ScheduledJobRegistrar implements IScheduledJobRegistrar {
             throw new Error(`Scheduled job already registered: ${normalized.id}`);
         }
 
-        this.definitions.set(normalized.id, normalized as ScheduledJobDefinition<unknown>);
         this.scheduler.schedule(
             normalized.cron,
             async (context) => {
@@ -45,6 +44,7 @@ export class ScheduledJobRegistrar implements IScheduledJobRegistrar {
             normalized.id,
             normalized.lockTtlMs === undefined ? undefined : { lockTtlMs: normalized.lockTtlMs },
         );
+        this.definitions.set(normalized.id, normalized as ScheduledJobDefinition<unknown>);
     }
 
     unregister(scheduleId: string): void {

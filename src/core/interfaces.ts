@@ -63,6 +63,9 @@ export interface IScheduler {
      * Stop all scheduled jobs.
      */
     stopAll(): void;
+
+    /** Abort and drain running callbacks before their dependencies are disposed. */
+    dispose(): Promise<void>;
 }
 
 export interface IMutex {
@@ -70,9 +73,12 @@ export interface IMutex {
      * Attempt to acquire a lock.
      * @param key Unique lock key
      * @param ttlMs Time to live in milliseconds
-     * @returns true if lock acquired, false if already locked
+     * @param occurrence Optional scheduled Unix timestamp in milliseconds. Atomically
+     * claim it only if newer than the last claimed occurrence for this key; retain
+     * that watermark across release, expiry, and close.
+     * @returns true if lock acquired, false if already locked or occurrence already claimed
      */
-    acquire(key: string, ttlMs: number): Promise<boolean>;
+    acquire(key: string, ttlMs: number, occurrence?: number): Promise<boolean>;
 
     /**
      * Refresh a lock TTL for the current owner.

@@ -31,6 +31,10 @@ export class SQLiteMutex implements IMutex {
       )
     `);
 
+        this.db.exec(`CREATE TABLE IF NOT EXISTS lock_occurrences (
+            key TEXT PRIMARY KEY, scheduled_at INTEGER NOT NULL
+        )`);
+
         const columns = this.db.pragma('table_info(locks)') as Array<{ name: string }>;
         if (!columns.some(({ name }) => name === 'owner_id')) {
             this.db.prepare('ALTER TABLE locks ADD COLUMN owner_id TEXT').run();
@@ -40,10 +44,13 @@ export class SQLiteMutex implements IMutex {
         this.db.prepare('DELETE FROM locks WHERE owner_id IS NULL').run();
     }
 
-    async acquire(key: string, ttlMs: number): Promise<boolean> {
+    async acquire(key: string, ttlMs: number, occurrence?: number): Promise<boolean> {
         if (!key) throw new Error('Lock key cannot be empty');
         if (ttlMs <= 0) throw new Error('Lock TTL must be greater than 0');
 
+        if (occurrence !== undefined && !Number.isSafeInteger(occurrence)) {
+            throw new Error('Lock occurrence must be an integer timestamp');
+        }
         const now = Date.now();
         const expiresAt = now + ttlMs;
         const ownerId = crypto.randomUUID();
@@ -59,9 +66,20 @@ export class SQLiteMutex implements IMutex {
             // Optimally, a background job cleans up. But for now, correctness first.
             this.db.prepare('DELETE FROM locks WHERE expires_at < ?').run(now);
 
+            if (occurrence !== undefined) {
+                const previous = this.db.prepare('SELECT scheduled_at FROM lock_occurrences WHERE key = ?')
+                    .get(key) as { scheduled_at: number } | undefined;
+                if (previous && previous.scheduled_at >= occurrence) return false;
+            }
+
             try {
                 this.db.prepare('INSERT INTO locks (key, expires_at, owner_id) VALUES (?, ?, ?)')
                     .run(key, expiresAt, ownerId);
+                if (occurrence !== undefined) {
+                    this.db.prepare(`INSERT INTO lock_occurrences (key, scheduled_at) VALUES (?, ?)
+                        ON CONFLICT(key) DO UPDATE SET scheduled_at = excluded.scheduled_at`)
+                        .run(key, occurrence);
+                }
                 return true;
             } catch (err: any) {
                 if (err.code === 'SQLITE_CONSTRAINT_PRIMARYKEY') {

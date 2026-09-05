@@ -197,7 +197,7 @@ export class SQLiteStore implements IStore {
 
     /** Start periodic cleanup of expired keys (default: every 5 minutes, batch size: 1000) */
     startSweeper(intervalMs: number = 300_000, batchSize: number = 1000): void {
-        if (this.sweepTimer || !this.ownsDb) return;
+        if (this.sweepTimer) return;
         this.sweepTimer = setInterval(() => this.sweep(batchSize), intervalMs);
         this.sweepTimer.unref(); // Don't prevent process exit
     }

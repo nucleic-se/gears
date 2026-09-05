@@ -88,6 +88,19 @@ Key configuration:
   `AbortSignal`. They must stop on cancellation and make effects idempotent or
   application-fenced. Non-cooperative effectful code must run in a killable child
   process; Gears does not pretend an in-process promise can be forcibly reaped.
+- **Execution timeout**: The worker aborts the handler but retains its concurrency
+  slot, processing claim, and heartbeat until the handler settles. Only then is
+  the timed-out attempt marked failed. Non-cooperative handlers require supervisor
+  termination; they cannot safely release their concurrency key while still running.
+- **Shutdown**: Cron callbacks are aborted and drained before bundle services are
+  unloaded. A shutdown warning does not permit dependencies to close beneath active
+  work. Non-cooperative callbacks can prevent graceful shutdown indefinitely.
+- **Cron occurrences**: SQLite atomically records the latest claimed scheduled
+  timestamp for each task alongside lock acquisition. The watermark survives lock
+  release, expiry, and restart; duplicate and older ticks are skipped. This is
+  at-most-once invocation, not guaranteed delivery: a crash after claiming a tick
+  can lose that tick, including before its queue insertion. No missed-tick replay
+  is provided. Queued jobs still use the at-least-once delivery contract above.
 - **Lock expiry**: Mutex entries have TTLs; stale locks are garbage-collected
 - **Job retries**: Configurable max attempts with exponential backoff
 

@@ -11,6 +11,7 @@ function harness() {
         unschedule: vi.fn(),
         list: vi.fn(async () => []),
         stopAll: vi.fn(),
+        dispose: vi.fn().mockResolvedValue(undefined),
     } as IScheduler;
     const queue = { add: vi.fn(async () => ({ id: 'job-1' })) } as unknown as IQueue;
     const now = () => new Date('2026-08-27T04:00:00.789Z');

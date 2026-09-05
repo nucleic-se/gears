@@ -241,6 +241,15 @@ npm run build
 npx gears load ./dist/src/bundles/my-bundle
 ```
 
+### Custom Scheduler and Mutex Implementations
+
+`IScheduler.dispose()` must abort and await active callbacks before returning.
+`IMutex.acquire(key, ttlMs, occurrence?)` must atomically claim an optional scheduled
+Unix timestamp together with the lock. Reject timestamps at or below the latest
+claimed timestamp for that key, and retain that watermark across release, expiry,
+and close. A failed acquisition must not consume the occurrence. Custom adapters
+must implement these semantics to preserve cron deduplication.
+
 ### Adding a Scheduled Task
 
 For application work, register a durable scheduled job. The cron callback only

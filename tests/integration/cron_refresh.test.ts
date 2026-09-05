@@ -59,7 +59,7 @@ describe('CronScheduler Refresh', () => {
 
         // 1. Assert Acquire
         await vi.advanceTimersByTimeAsync(1); // Tick microtasks
-        expect(mutex.acquire).toHaveBeenCalledWith('job:test-job', 600000);
+        expect(mutex.acquire).toHaveBeenCalledWith('job:test-job', 600000, expect.any(Number));
 
         // 2. Advance time by 300s (refresh interval)
         await vi.advanceTimersByTimeAsync(300000);
@@ -91,14 +91,14 @@ describe('CronScheduler Refresh', () => {
         // @ts-ignore
         const defaultCallback = cron.schedule.mock.calls[0][1];
         await defaultCallback();
-        expect(mutex.acquire).toHaveBeenCalledWith('job:default-ttl-job', 120000);
+        expect(mutex.acquire).toHaveBeenCalledWith('job:default-ttl-job', 120000, expect.any(Number));
 
         scheduler.schedule('* * * * *', async () => { }, 'override-ttl-job', { lockTtlMs: 30000 });
 
         // @ts-ignore
         const overrideCallback = cron.schedule.mock.calls[1][1];
         await overrideCallback();
-        expect(mutex.acquire).toHaveBeenCalledWith('job:override-ttl-job', 30000);
+        expect(mutex.acquire).toHaveBeenCalledWith('job:override-ttl-job', 30000, expect.any(Number));
     });
 
     it('should stop refreshing if lock is lost', async () => {

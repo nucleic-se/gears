@@ -72,6 +72,7 @@ export class RateLimitedFetcher implements IFetcher {
                     // Retry on 429 or 5xx with exponential backoff
                     if (response.status === 429 || response.status >= 500) {
                         if (attempt < maxRetries) {
+                            await response.body?.cancel();
                             let delayMs = 1000 * Math.pow(2, attempt);
 
                             const retryAfter = response.headers.get('retry-after');

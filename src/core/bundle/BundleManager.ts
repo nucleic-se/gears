@@ -179,6 +179,9 @@ export class BundleManager {
             const providers = bundle.providers.map(P => new P(this.app));
             for (const provider of providers) await provider.register();
             for (const provider of providers) await provider.boot();
+        } catch (error) {
+            for (const key of [...registeredKeys].reverse()) await this.app.unbind(key);
+            throw error;
         } finally {
             this.app.bind = origBind;
             this.app.singleton = origSingleton;
@@ -438,12 +441,12 @@ export class BundleManager {
             const desiredPaths = new Set(Array.from(desiredBundles).map(p => path.resolve(p)));
 
             if (options.watch) {
-                const currentBundles = Array.from(this.bundles.values());
+                const currentBundles = this.getBootOrder([...this.bundles.values()], this.bundles).reverse();
                 for (const record of currentBundles) {
                     if (!desiredPaths.has(record.path)) {
                         this.logger.info(`Bundle removed from config, unloading`, { bundle: record.name });
                         try {
-                            await this.unload(record.name);
+                            await this.unload(record.name, { persist: false });
                         } catch (e) {
                             this.logger.error(`Failed to unload bundle`, { bundle: record.name, error: e });
                         }
@@ -506,11 +509,11 @@ export class BundleManager {
             }
 
             if (options.watch) {
-                this.watchConfig();
+                await this.watchConfig();
             }
         } catch (error: any) {
             if (options.watch && error.code === 'ENOENT') {
-                this.watchConfig();
+                await this.watchConfig();
             } else if (error.code !== 'ENOENT') {
                 this.logger.error('Error reading bundles.json', { error });
             }
@@ -518,6 +521,7 @@ export class BundleManager {
     }
 
     private isWatching = false;
+    private debounceTimer?: NodeJS.Timeout;
     private async watchConfig() {
         if (this.isWatching) return;
         this.isWatching = true;
@@ -525,39 +529,16 @@ export class BundleManager {
         const fs = await import('fs');
         this.logger.debug(`Watching for config changes`, { path: this.configPath });
 
-        let debounceTimer: NodeJS.Timeout;
-
-        // Watch directory if file doesn't exist? 
-        // fs.watch on non-existent file throws.
-        // We need to wait for it or watch directory.
-        // watching directory is simpler but noisy.
-        // Let's rely on polling-like check or watch the directory.
-
-        const watchTarget = fs.existsSync(this.configPath) ? this.configPath : path.dirname(this.configPath);
-        const watchingDir = watchTarget !== this.configPath;
-
-        this.fsWatcher = fs.watch(watchTarget, (eventType, filename) => {
-            // If watching dir, confirm it is our file (if filename provided)
-            // If filename is null/undefined, we err on safe side and trigger reload (debounce handles flooding)
-            if (watchingDir && filename && filename !== 'bundles.json') return;
-
-            if (eventType === 'rename' && watchingDir) {
-                // Might be created now.
-            }
-
-            clearTimeout(debounceTimer);
-            debounceTimer = setTimeout(() => {
+        // Config writes replace the inode, so watch its directory across renames.
+        this.fsWatcher = fs.watch(path.dirname(this.configPath), (_eventType, filename) => {
+            if (filename && filename !== path.basename(this.configPath)) return;
+            clearTimeout(this.debounceTimer);
+            this.debounceTimer = setTimeout(() => {
+                if (!this.isWatching) return;
                 this.logger.debug('Config changed, reloading bundles');
-                this.restore();
-
-                // If we were watching dir and file appeared, maybe we should watch file now?
-                // Simpler: just keep watching dir or re-evaluate. 
-                // For now, simple reload is enough as restore checks file existence.
+                void this.restore();
             }, 500);
         });
-
-        // Handle error? fs.watch throws if path invalid. 
-        // path.dirname(this.configPath) should allow exist (cwd).
     }
 
     private async persistBundlePath(newBundlePath: string): Promise<void> {
@@ -586,6 +567,7 @@ export class BundleManager {
     }
     async close(): Promise<void> {
         this.isWatching = false;
+        clearTimeout(this.debounceTimer);
         if (this.fsWatcher) {
             this.fsWatcher.close();
             this.fsWatcher = undefined;
