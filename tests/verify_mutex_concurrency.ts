@@ -1,5 +1,5 @@
 
-import { SQLiteMutex } from '../src/core/infra/SQLiteMutex';
+import { SQLiteMutex } from '../src/core/infra/SQLiteMutex.js';
 import { fork } from 'child_process';
 import path from 'path';
 

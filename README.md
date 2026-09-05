@@ -21,7 +21,7 @@ npm install
 npm run build
 ```
 
-Node.js requirement: `>=22.0.0`
+Node.js requirement: `>=22.14.0`
 
 Run the worker:
 ```bash
@@ -88,3 +88,8 @@ npm run dev
 ```
 
 This runs the TypeScript watcher and restarts the worker automatically.
+
+## Release validation
+
+See [release checks and supported runtime](docs/RELEASE_VALIDATION.md) for CI,
+consumer-package validation, and test type-checking.

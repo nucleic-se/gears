@@ -4,11 +4,14 @@ import type { Container } from '../../src/core/container/Container.js';
 export const events: string[] = [];
 export let failBoot = false;
 export function setFailBoot(value: boolean) { failBoot = value; }
+declare module '../../src/core/services.js' {
+    interface ServiceMap { '__NAME__': { close(): void } }
+}
 const name = '__NAME__';
 class Provider {
     constructor(private app: Container) {}
     register() {
-        this.app.singleton(name as never, () => {
+        this.app.singleton(name, () => {
             const timer = setInterval(() => {}, 1000);
             events.push('opened');
             return { close() {

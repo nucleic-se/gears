@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const blessedMocks = vi.hoisted(() => ({
     box: vi.fn(() => ({ kind: 'box' })),
-    listtable: vi.fn(() => ({ kind: 'table' })),
+    listtable: vi.fn((_options: { label?: string }) => ({ kind: 'table' })),
     log: vi.fn(() => ({ kind: 'log' })),
 }));
 

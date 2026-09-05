@@ -17,7 +17,7 @@ async function fixture(dir: string, name: string, requires: string[] = []) {
     const folder = path.join(dir, name);
     await mkdir(folder);
     const source = (await readFile(new URL('../fixtures/lifecycle_bundle.ts', import.meta.url), 'utf8'))
-        .replace('__NAME__', name).replace('[] as string[]', JSON.stringify(requires));
+        .replaceAll('__NAME__', name).replace('[] as string[]', JSON.stringify(requires));
     await writeFile(path.join(folder, 'package.json'), '{"type":"module"}');
     await writeFile(path.join(folder, 'index.js'), ts.transpileModule(source, { compilerOptions: {
         target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022,

@@ -104,7 +104,7 @@ describe('Bundle Dependencies', () => {
 
             // Verify the bundle was NOT booted (the critical behavior)
             const loaded = manager.getLoadedBundles();
-            const bundleA = loaded.find((b: any) => b.name === 'BundleA_2');
+            const bundleA = manager.getBundle('BundleA_2');
             // Bundle should either not be loaded or not be in 'booted' status
             if (bundleA) {
                 expect(bundleA.status).not.toBe('booted');
@@ -138,8 +138,8 @@ describe('Bundle Dependencies', () => {
 
             // Verify that neither bundle in the cycle was booted
             const loaded = manager.getLoadedBundles();
-            const bundleA = loaded.find((b: any) => b.name === 'BundleA_3');
-            const bundleB = loaded.find((b: any) => b.name === 'BundleB_3');
+            const bundleA = manager.getBundle('BundleA_3');
+            const bundleB = manager.getBundle('BundleB_3');
             if (bundleA) {
                 expect(bundleA.status).not.toBe('booted');
             }

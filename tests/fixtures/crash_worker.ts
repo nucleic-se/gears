@@ -16,6 +16,6 @@ process.on('message', async message => {
     if (message === 'stop') {
         await worker.stop();
         await queue.close();
-        process.disconnect();
+        process.disconnect?.();
     }
 });

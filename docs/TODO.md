@@ -16,7 +16,7 @@ Updated to reflect the current `gears` codebase.
 - [x] **Instrumentation**: Worker and Queue emit metrics.
 - [x] **Gears Inspector (`gears top`)**: TUI showing queue stats, metrics, and log tail.
 - [x] **Cross-process EventBus**: `IDurableEventBus` / `SQLiteDurableEventBus`.
-- [x] **Node version checks aligned**: `doctor` and `package.json` now both require Node >= 22.0.0.
+- [x] **Node version checks aligned**: `doctor` and `package.json` now both require Node >= 22.14.0.
 - [x] **Queue requeue filter parity**: `queue requeue-all --type` now filters by job type.
 - [x] **Bundle command namespace hardening**: Additional core commands reserved for bundle names.
 - [x] **Lean container service contracts**: `ServiceMap` depends on structural contracts rather than concrete Zod/SQLite/bundle implementations; an Ivy consumer build verifies the public type graph stays tractable.

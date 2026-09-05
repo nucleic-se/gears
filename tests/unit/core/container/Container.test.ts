@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { Container } from '../../../../src/core/container/Container';
+import { Container } from '../../../../src/core/container/Container.js';
 
 describe('Container', () => {
     it('should dispose services in LIFO order (reverse resolution)', async () => {

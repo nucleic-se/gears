@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import 'dotenv/config';
-import { Command } from 'commander';
+import { Command, CommanderError } from 'commander';
 import { Bundle } from '../core/bundle/Bundle.js';
 import { CommandDefinition, ILogger, IMutex, OutputMode } from '../core/interfaces.js';
 import { ConsoleOutput } from '../core/commands/CommandOutput.js';
@@ -19,10 +19,6 @@ program
     .option('--output <mode>', 'Output mode (text, json, silent, tui)')
     .option('--debug', 'Enable debug logs')
     .exitOverride();
-
-// Parse known options early to apply --output/--debug before first boot
-// This allows setting LoggerOptions before ILogger is resolved
-program.parseOptions(process.argv);
 
 /**
  * Boot the app with CLI options applied (e.g., output mode)
@@ -267,7 +263,7 @@ program
                 Number.parseInt(patch ?? '0', 10) || 0,
             ];
         };
-        const requiredNode: [number, number, number] = [22, 0, 0];
+        const requiredNode: [number, number, number] = [22, 14, 0];
         const [curMajor, curMinor, curPatch] = parseSemver(nodeVersion);
         const [reqMajor, reqMinor, reqPatch] = requiredNode;
         const meetsRequirement =
@@ -278,7 +274,7 @@ program
         if (meetsRequirement) {
             output.log(`${ok('✓')} Node.js ${nodeVersion}`);
         } else {
-            output.log(`${err('✗')} Node.js ${nodeVersion} (Required: >=22.0.0)`);
+            output.log(`${err('✗')} Node.js ${nodeVersion} (Required: >=22.14.0)`);
         }
 
         // 2. Config Check
@@ -458,6 +454,8 @@ function registerBundleCommands(
 // --- Main: Load bundles and register their commands ---
 
 async function main() {
+    // Parse before boot, within the error boundary for help/version exits.
+    program.parseOptions(process.argv);
     const opts = program.opts();
     // Use bootWithOptions logic to resolve mode correctly
     let mode: OutputMode | undefined;
@@ -539,6 +537,10 @@ main().finally(async () => {
     for (const app of commandApps) await app.shutdown();
     commandApps.clear();
 }).catch((err) => {
+    if (err instanceof CommanderError) {
+        process.exitCode = err.exitCode;
+        return;
+    }
     console.error('Fatal error:', err);
     process.exitCode = 1;
 });
