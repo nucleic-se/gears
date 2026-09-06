@@ -352,3 +352,31 @@ Follow-up submission now validates an existing tree's composition before claimin
 or mutating it. Tests verify that rejection leaves state and revision unchanged,
 and the original composition can later resume normally. Build and 56 harness
 tests passed. No deployed instance or existing runtime data was modified.
+
+### Repeated fixed-workload campaign
+
+Three sequential rounds used Terra, frozen source-review inputs and unchanged
+budgets at Agentic `231ce78` / Gears `9dc1c5a`. Source review passed 3/3 trials
+(21, 25, 25 calls; 93,465, 144,852, 164,110 input tokens). Ledger reconciliation
+passed 2/3. All six runs completed both children and checkpoint restart, with
+exactly two delegations and one scheduled continuation each. All 116 dispatched
+model calls had matching receipts and prepared context within the configured
+ceiling. No token-budget or request-deadline failure occurred in this sample.
+
+The failed ledger trial returned 10,396 instead of 10,270: a child computed the
+wrong subtotal and its parent repeated it. Independent CSV parsing confirmed the
+oracle. The other two identical trials were correct. The fixture grants read/save
+tools without computation, so this exposes unaided arithmetic/verification limits,
+not a demonstrated scheduling or context defect.
+
+Agentic's three live context modes passed in all three repeats; pressured cases
+used one retrieval and two calls each. Roomy cases sometimes made unnecessary or
+invalid lookups. The six deterministic context cases were identical across three
+repeats. Standalone/process-control tests passed three times (once in the full
+56-test suite and twice as 46-test focused runs).
+
+All evidence, frozen input hashes and the repeatable runner remain outside source
+control. This small sample does not establish a stable success rate or competitor
+advantage. It supports prioritizing deterministic computation and answer verification
+before inventing a new completion-budget policy. No runtime behavior was changed
+during these measurements; earlier failures remain retained.
