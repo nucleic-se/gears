@@ -161,7 +161,8 @@ export class TreeStore implements ExecutionJournal<Tree, TreeEvent> {
         const expected = tree.revision;
         tree.ownerEpoch = this.epoch;
         tree.revision++;
-        await this.commit(id, expected, tree, { sequence: tree.revision, type: 'host.claimed', at: Date.now() });
+        tree.updatedAt = Date.now();
+        await this.commit(id, expected, tree, { sequence: tree.revision, type: 'host.claimed', at: tree.updatedAt });
     }
     async events(id: string, after = 0): Promise<TreeEvent[]> {
         return (await this.db.selectFrom('harness_events').select('event').where('tree_id', '=', id).where('sequence', '>', after)

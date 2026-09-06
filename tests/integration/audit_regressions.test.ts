@@ -28,6 +28,12 @@ const deferred = () => {
 afterEach(() => { vi.useRealTimers(); vi.clearAllMocks(); });
 
 describe('audit regressions', () => {
+    it.each([0, -1, 1.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1])('rejects invalid worker concurrency %s before resolving services', async maxConcurrency => {
+        const queue = new SQLiteQueue(':memory:', undefined, p => p);
+        try {
+            expect(() => new Worker(queue, new Container(), { maxConcurrency })).toThrow('maxConcurrency must be a positive safe integer');
+        } finally { await queue.close(); }
+    });
     it.each([1, 2])('retains timeout claims and slots with concurrency %s', async maxConcurrency => {
         vi.useFakeTimers();
         const queue = new SQLiteQueue(':memory:', undefined, p => p);

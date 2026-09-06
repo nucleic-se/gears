@@ -6,6 +6,22 @@ import { assertHarnessBoundaryConformance } from '@nucleic-se/agentic/testing';
 import { StandaloneHarness } from '../src/standalone/host.js';
 import { terminal } from '../src/standalone/state.js';
 
+it('ownership claims persist the transition timestamp with their event', async () => {
+    const dataDir = await mkdtemp(join(tmpdir(), 'gears-claim-'));
+    const host = await StandaloneHarness.open({ dataDir, provider: { turn: vi.fn(), structured: vi.fn() } });
+    try {
+        const tree = await host.store.create('unstarted', [], host.compositionId);
+        const timestamp = tree.updatedAt + 1000;
+        const clock = vi.spyOn(Date, 'now').mockReturnValue(timestamp);
+        try { await host.store.claim(tree); } finally { clock.mockRestore(); }
+        const claimed = (await host.store.get(tree.id))!;
+        const event = (await host.store.events(tree.id)).at(-1)!;
+        expect(claimed.updatedAt).toBe(timestamp);
+        expect(claimed.revision).toBe(tree.revision + 1);
+        expect(event).toMatchObject({ type: 'host.claimed', at: timestamp, sequence: claimed.revision });
+    } finally { await host.close(); await rm(dataDir, { recursive: true, force: true }); }
+});
+
 it('the queued Gears composition satisfies the same request boundary as the local driver', async () => {
     const report = await assertHarnessBoundaryConformance(async ({ provider, context }) => {
         const dataDir = await mkdtemp(join(tmpdir(), 'gears-foundation-'));

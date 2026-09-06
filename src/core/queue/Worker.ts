@@ -38,6 +38,9 @@ export class Worker {
     private jobRegistry?: any;
 
     constructor(queue: IQueue, app: Container, options: WorkerOptions = {}) {
+        this.maxConcurrency = options.maxConcurrency ?? 5;
+        if (!Number.isSafeInteger(this.maxConcurrency) || this.maxConcurrency < 1)
+            throw new RangeError('maxConcurrency must be a positive safe integer');
         this.queue = queue;
         this.app = app;
         this.options = options;
@@ -48,7 +51,6 @@ export class Worker {
             this.metrics = app.make('IMetrics');
         }
 
-        this.maxConcurrency = options.maxConcurrency ?? 5;
         this.pollIntervalMs = options.pollInterval ?? 1000;
         this.recoveryCheckIntervalMs = options.recoveryCheckIntervalMs ?? 60000;
         this.recoveryTimeoutMs = options.recoveryTimeoutMs ?? 300000;
