@@ -14,17 +14,19 @@ function option(name: string, fallback: string) {
     return args[index + 1];
 }
 const dataDir = resolve(option('--data', '.data/standalone')), workspace = resolve(option('--workspace', process.cwd()));
-const host = await StandaloneHarness.open({ dataDir, provider: new CodexSubscriptionProvider({ model: option('--model', 'gpt-6-astra'), reasoningEffort: 'low' }),
-    tools: await workspaceTools(workspace), composition: `default-v1:${workspace}` });
-let web: Awaited<ReturnType<typeof attachWeb>> | undefined;
+const webEnabled = !args.includes('--no-web');
+const token = webEnabled ? process.env.GEARS_AGENT_TOKEN ?? randomBytes(24).toString('hex') : undefined;
+const hostname = option('--host', '127.0.0.1'), port = Number(option('--port', '4318'));
+const model = option('--model', 'gpt-6-astra');
+const host = await StandaloneHarness.open({ dataDir, provider: new CodexSubscriptionProvider({ model, reasoningEffort: 'low' }),
+    tools: await workspaceTools(workspace), composition: `default-v2:${workspace}:${model}`,
+    extensions: webEnabled ? [{ id: 'ui.web', version: '1', apiVersion: 1, activate: async client => {
+        const web = await attachWeb(client, { token: token!, port, hostname });
+        return () => web.close();
+    } }] : [],
+});
 try {
-    if (!args.includes('--no-web')) {
-        const token = process.env.GEARS_AGENT_TOKEN ?? randomBytes(24).toString('hex');
-        web = await attachWeb(host, { token, port: Number(option('--port', '4318')), hostname: option('--host', '127.0.0.1') });
-        console.log(JSON.stringify({ type: 'ready', url: `http://${option('--host', '127.0.0.1')}:${option('--port', '4318')}`, token, workspace, dataDir }));
-    }
-    else
-        console.log(JSON.stringify({ type: 'ready', workspace, dataDir }));
+    console.log(JSON.stringify({ type: 'ready', ...(webEnabled ? { url: `http://${hostname}:${port}`, token } : {}), workspace, dataDir }));
     process.send?.({ type: 'ready' });
     process.on('message', async (message: {
         type: string;
@@ -48,7 +50,6 @@ try {
     await new Promise<void>(resolve => { process.once('SIGINT', () => resolve()); process.once('SIGTERM', () => resolve()); });
 }
 finally {
-    await web?.close();
     await host.close();
     if (process.connected) process.disconnect?.();
 }

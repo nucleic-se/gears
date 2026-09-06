@@ -61,6 +61,7 @@ it('does not replay an ambiguous provider request after reopen', async () => {
     const second = await open(model(turn), first.options.dataDir);
     await second.reconcile();
     expect(turn).toHaveBeenCalledOnce();
+    expect((await second.store.get(tree.id))!.tasks[tree.id].error).toBe('transport lost');
     await expect(second.send(tree.id, tree.id, 'retry')).rejects.toThrow('requires review');
 });
 it('rejects a second active host using the Gears mutex', async () => {
@@ -175,7 +176,7 @@ it('reserves shared token budget before concurrent child dispatch', async () => 
     const barrier = new Promise<void>(r => { release = r; });
     const turn = vi.fn(async () => { await barrier; return reply('done'); });
     const h = await open(model(turn)), { newTask } = await import('../src/standalone/state.js');
-    const tree = await h.store.create('root', [], 'default-v1', { tokens: 3000 });
+    const tree = await h.store.create('root', [], h.compositionId, { tokens: 3000 });
     await h.store.change(tree.id, 'fixture.children', t => { t.tasks[t.id].phase = 'completed'; t.tasks[t.id].children = ['left', 'right']; for (const id of ['left', 'right'])
         t.tasks[id] = newTask(id, id, [], { parentId: t.id, depth: 1 }); });
     try {
@@ -209,7 +210,7 @@ it('rejects a FIFO without blocking its read tool', async () => {
 });
 it('refuses incompatible startup without destroying resumable work', async () => {
     const provider = model(async () => reply('resumed')), first = await open(provider);
-    const tree = await first.store.create('preserve me', [], 'default-v1');
+    const tree = await first.store.create('preserve me', [], first.compositionId);
     await first.close();
     hosts.splice(hosts.indexOf(first), 1);
     await expect(StandaloneHarness.open({ ...first.options, composition: 'wrong' })).rejects.toThrow('original composition');

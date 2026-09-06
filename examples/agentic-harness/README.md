@@ -1,7 +1,10 @@
 # Agentic harness on Gears
 
-An independent standalone agent built from Agentic primitives and Gears infrastructure.
+A standalone composition of the Agentic harness, using Gears for durable execution.
 The original one-turn composition example remains available with `npm run demo`.
+
+See the [north star](NORTH_STAR.md) for the shared Agentic/Gears direction and
+the simplicity and reliability criteria that guide this composition.
 
 ## Run the standalone agent
 
@@ -63,22 +66,42 @@ Example task:
 | Gears named delayed jobs | Persistent wake delivery and idempotent repair of state-to-queue gaps |
 | Gears `IMutex` | Renewable ownership of one standalone host per data directory |
 | Gears database provider | Connection and lifecycle for application-owned tables |
-| Agentic context primitive | Token estimates, selection and atomic message-group handling |
-| Agentic execution primitives | Model boundary and validated tool dispatch |
-| Standalone harness | Task tree, delegation, progress, budgets and receipts |
+| Agentic context strategy | Shared budgeted policy, token estimates, selection and atomic message-group handling |
+| Agentic harness composer and execution services | Extension contracts, request preparation, model boundary and validated tool dispatch |
+| Gears driver | Task tree, delegation, progress, budgets, receipts and worker admission |
 | Optional adapters | Provider, workspace tools, context composer and web UI |
 
-`StandaloneHarness.open({ dataDir, provider, tools, composeContext, composition })`
-creates the runtime. It exposes `create`, `send`, `cancel`, `store` and `close`.
+`StandaloneHarness.open({ dataDir, provider, tools, context, composition, extensions })`
+composes the Agentic harness with the Gears driver. It exposes `create`, `send`, `cancel`, `store` and `close`.
 `HarnessTool` provides a definition, pure argument validation, an explicit
 read/write effect classification, and execution. Tools are trusted host code;
 registering an effectful tool grants it to the default root agent. Children can
 receive only a subset of their parent's manifest. A production write-tool pack
 needs its chosen authorization/approval policy before registration.
 
+`context` uses Agentic's `ContextStrategy` contract, replacing the old
+`composeContext` callback. A custom context needs an explicit non-secret
+`composition` identity and a consistent usage report for durable token admission.
+The built-in strategy is Agentic's `budgetedContext`; its report and final request
+pass through the same boundary as the local Agentic agent.
+
+`extensions` use Agentic's `HarnessExtension<GearsHarnessRoles, StandaloneHarness>`.
+The composition owns `runtime`, `provider` and `context` roles. The CLI attaches
+its optional web UI through extension activation. Shutdown rejects new commands,
+drains admitted commands and workers, disposes attached extensions, then releases
+the runtime lease and database. Extension disposers can still read committed state.
+
+**Alpha persistence break:** newly created trees use a fingerprinted composition
+identity. Old active trees with the previous identity are rejected before recovery
+changes them. Use a fresh data directory for this revision, or finish old work
+using the previous revision. No automatic migration or silent reset is performed.
+Changing the context ceiling, output cap or registered tool manifest also changes
+the fingerprint. The CLI additionally includes its model choice. The public
+`compositionId` is the identity to use when constructing a tree through the store.
+
 Change the explicit `composition` identifier when changing persisted execution
 semantics. Startup refuses incompatible active tasks without changing their execution
-state; restoring the original configuration preserves their ability to continue. The CLI binds its composition to the workspace path. Tool declarations
+state; restoring the original configuration preserves their ability to continue. The CLI binds its composition to the workspace path as well as the role fingerprint. Tool declarations
 are not a sandbox; filesystem confinement does not defeat hostile local races.
 
 The bounded task tree is the transaction boundary. Creating a child, spending
@@ -128,3 +151,19 @@ coding-agent capability benchmark.
 
 Ordinary tests use fake providers with real Gears queues and databases. The
 original one-turn example's recovery and scheduling tests remain included.
+
+The shared `assertHarnessBoundaryConformance` suite now runs against this queued
+composition and Agentic's local session composition. It covers isolated context
+selection and rejected-request behavior. Gears-specific tests additionally cover
+activation rollback, shutdown drain, configuration mismatch and lease recovery.
+
+### Evaluating longer work
+
+Run `npm run dogfood` from this example directory to repeat the source-review
+scenario with two children and a forced restart after a scheduled checkpoint.
+The controller writes `.data/dogfood-report.json` on success or failure, including
+elapsed time and its last observed task tree. Preserve that report before another
+run overwrites it. Reports and task data stay outside source control.
+
+Context sizes are workload-dependent. The illustrative 128k-token / 4 MB example
+in design discussions is not a fixed limit or acceptance requirement.

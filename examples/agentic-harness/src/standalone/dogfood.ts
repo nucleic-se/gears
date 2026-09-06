@@ -41,7 +41,27 @@ async function inspect(id: string) {
     };
 }
 async function stop(signal: NodeJS.Signals) { const current = child!; const exited = new Promise<void>(r => current.once('exit', () => r())); current.kill(signal); await exited; child = undefined; }
+const startedAt = Date.now();
 let id = '', restarted = false;
+let latestTree: Tree | undefined;
+async function saveReport(passed: boolean, error?: unknown) {
+    const children = Object.values(latestTree?.tasks ?? {}).filter(task => task.parentId === id);
+    const report = {
+        scenario: 'source-review-with-restart', passed, id, dataDir, restarted,
+        elapsedMs: Date.now() - startedAt,
+        error: error instanceof Error ? error.message : error === undefined ? undefined : String(error),
+        modelCalls: latestTree?.modelCalls, usage: latestTree?.usage,
+        children: children.map(task => ({ id: task.id, phase: task.phase, answer: task.answer, error: task.error })),
+        artifacts: latestTree?.artifacts, answer: latestTree?.tasks[id]?.answer,
+        // Preserve the last observation even when the worker can no longer answer IPC.
+        tree: latestTree,
+    };
+    const output = resolve('.data/dogfood-report.json');
+    await mkdir(resolve('.data'), { recursive: true });
+    await writeFile(output, JSON.stringify(report, null, 2) + '\n');
+    console.log(JSON.stringify({ stage: 'finished', passed, report: output, modelCalls: report.modelCalls, usage: report.usage }));
+}
+
 try {
     await start();
     const created = message('created');
@@ -54,6 +74,7 @@ Wait for both using wait_agents. Read their findings, save_progress with a usefu
     while (true) {
         deadline.throwIfAborted();
         const { tree, queue } = await inspect(id), root = tree.tasks[id];
+        latestTree = tree;
         const phases = Object.values(tree.tasks).map(t => `${t.parentId ? 'child' : 'parent'}:${t.phase}`).join(',');
         if (phases !== last) {
             console.log(JSON.stringify({ stage: 'progress', phases, modelCalls: tree.modelCalls }));
@@ -70,19 +91,19 @@ Wait for both using wait_agents. Read their findings, save_progress with a usefu
         if (root.phase === 'completed') {
             const children = Object.values(tree.tasks).filter(t => t.parentId === id);
             const passed = restarted && children.length === 2 && children.every(t => t.phase === 'completed') && Boolean(tree.artifacts['review.md']);
-            const report = { passed, id, dataDir, restarted, modelCalls: tree.modelCalls, usage: tree.usage, children: children.map(t => ({ id: t.id, phase: t.phase, answer: t.answer })), artifacts: tree.artifacts, answer: root.answer };
-            const output = resolve('.data/dogfood-report.json');
-            await mkdir(resolve('.data'), { recursive: true });
-            await writeFile(output, JSON.stringify(report, null, 2) + '\n');
-            console.log(JSON.stringify({ stage: 'finished', passed, report: output, modelCalls: tree.modelCalls, usage: tree.usage }));
             if (!passed)
                 throw new Error('Acceptance criteria not met');
+            await saveReport(true);
             break;
         }
         if (['failed', 'unknown', 'cancelled'].includes(root.phase))
             throw new Error(`Task ended ${root.phase}: ${root.error}`);
         await delay(250, undefined, { signal: deadline });
     }
+}
+catch (error) {
+    await saveReport(false, error);
+    throw error;
 }
 finally {
     if (child)
