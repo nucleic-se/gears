@@ -114,3 +114,14 @@ was built after the live run.
 Next evaluation work should investigate context repetition, request deadlines and
 budget use together. Do not raise limits simply to turn this scenario green.
 The 128k-token / 4 MB illustration is a mental model, not an acceptance threshold.
+
+### Runtime inspection
+
+Both compositions expose read-only, revision-bounded inspection snapshots and web
+inspectors with JSON download. Agentic tests verify an in-flight request equals
+provider input, repeated reads do not reselect context, and events beyond the
+captured revision are excluded. Gears verifies authenticated in-flight inspection,
+full context accounting, and exact request preservation after reopening storage.
+Both browser flows were exercised in headless Chrome at 390×844, including request
+expansion and JSON download, with no page errors. These checks used deterministic
+fixture providers; no live model was needed for inspection verification.

@@ -227,3 +227,36 @@ it('a paused startup cannot claim a tree snapshot already claimed by a newer own
     await expect(h.store.claim(snapshot)).rejects.toThrow('Stale tree revision');
     expect((await newer.get(tree.id))?.ownerEpoch).toBe(newer.epoch);
 });
+
+it('exposes exact in-flight requests through authenticated inspection and preserves them after reopen', async () => {
+    const { attachWeb } = await import('../src/standalone/web.js');
+    let entered!: () => void, release!: () => void;
+    const started = new Promise<void>(resolve => { entered = resolve; });
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    let request: TurnRequest | undefined;
+    const turn = vi.fn(async (input: TurnRequest) => { request = structuredClone(input); entered(); await gate; return reply('done'); });
+    const first = await open(model(turn));
+    const web = await attachWeb(first, { token: 'inspection-test', port: 0 });
+    try {
+        const tree = await first.create('Inspect this exact objective');
+        await started;
+        const address = web.server.address() as { port: number };
+        const url = `http://127.0.0.1:${address.port}/api/tasks/${tree.id}/inspect`;
+        expect((await fetch(url)).status).toBe(401);
+        const response = await fetch(url, { headers: { Authorization: 'Bearer inspection-test' } });
+        expect(response.status).toBe(200);
+        const snapshot = await response.json();
+        const intent = snapshot.events.find((event: { type: string }) => event.type === 'model.intent');
+        expect(intent.data.intent.request).toEqual(request);
+        expect(intent.data.context.usage.reservedOutputTokens).toBe(1800);
+        expect(snapshot.state.tasks[tree.id].phase).toBe('model');
+        await first.inspect(tree.id);
+        expect(turn).toHaveBeenCalledOnce();
+        release();
+        await state(first, tree.id, current => expect(current.tasks[tree.id].phase).toBe('completed'));
+        await first.close(); hosts.splice(hosts.indexOf(first), 1);
+        const second = await open(model(turn), first.options.dataDir);
+        const recovered = await second.inspect(tree.id);
+        expect(recovered.events.find(event => event.type === 'model.intent')?.data).toEqual(intent.data);
+    } finally { release(); await web.close(); }
+});

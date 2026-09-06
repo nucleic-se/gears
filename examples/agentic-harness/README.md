@@ -167,3 +167,25 @@ run overwrites it. Reports and task data stay outside source control.
 
 Context sizes are workload-dependent. The illustrative 128k-token / 4 MB example
 in design discussions is not a fixed limit or acceptance requirement.
+
+### Inspecting the machinery
+
+Click **Inspect machinery** on a task tree to capture its committed state and
+trace. Expand `model.intent` to see the exact request submitted to the provider
+adapter, plus context decisions and token accounting. Model receipts include
+outcome, duration and usage; the other events show tool execution and task
+transitions. The state includes messages, inboxes, progress, children, wake times
+and shared budget charges. Refresh captures again; **Download JSON** saves the
+current snapshot and trace page. This works while a model call is in flight.
+
+Programmatically, use `host.inspect(treeId, afterSequence)` or authenticated
+`GET /api/tasks/:id/inspect?after=0`. Trace pages contain at most 200 events;
+pass `nextSequence` as `after` to continue. Each page is capped at its captured
+state revision. Requests are read from durable intents, never reconstructed or
+reselected. Older intents may contain only selection decisions rather than the
+new full context report.
+
+The snapshot describes committed harness state, not arbitrary extension internals
+or provider-private processing. Before request admission, selected context may not
+exist yet. An intent alone does not prove dispatch. JSON exports include task and
+tool content and inherit the UI's authentication boundary.
