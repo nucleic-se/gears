@@ -214,11 +214,20 @@ hits or token-cost savings are not guaranteed. Resource figures are a snapshot
 before request admission, and concurrent children can consume budget afterward.
 Admission still checks the authoritative shared state atomically.
 
-The Gears runtime extension is version 5 (version 4 fixed UTF-8 reads and admission
-diagnostics; version 5 adds timeout policy and separates model/tool steps). The
+The Gears runtime extension is version 6 (version 4 fixed UTF-8 reads and admission
+diagnostics; version 5 added timeout policy and separated model/tool steps;
+version 6 preserves ambiguous tool outcomes and validates completed-task continuation). The
 configured model timeout is included in the composition fingerprint. Active
 trees from earlier compositions require their original revision; new dogfood
 runs use fresh data directories. Existing data is not migrated or deleted.
+Continuing a completed tree also requires its original composition. An incompatible
+follow-up is rejected before ownership or task state changes.
+
+After dispatch, Agentic tool receipts classified as `unknown`, `timeout` or
+`cancelled` stop the task as `unknown` in the same transaction as the receipt.
+No remaining tools or model calls run automatically, including after restart.
+An explicit task cancellation before dispatch remains cancelled and does not imply
+an unknown effect.
 
 ### Recovering older tool evidence
 

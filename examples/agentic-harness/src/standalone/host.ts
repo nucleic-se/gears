@@ -55,7 +55,7 @@ export class StandaloneHarness {
         if (options.context && !options.composition) throw new Error('Custom context requires an explicit composition identity');
         return createHarness().compose({
             extensions: [
-                { id: 'runtime.gears', version: '5', apiVersion: 1, configuration: JSON.stringify({ modelTimeoutMs, outputTokens: options.outputTokens ?? 1800, tools: (options.tools ?? []).map(tool => ({ definition: tool.definition, effect: tool.effect })) }), roles: { runtime: () => StandaloneHarness.openRuntime(options) } },
+                { id: 'runtime.gears', version: '6', apiVersion: 1, configuration: JSON.stringify({ modelTimeoutMs, outputTokens: options.outputTokens ?? 1800, tools: (options.tools ?? []).map(tool => ({ definition: tool.definition, effect: tool.effect })) }), roles: { runtime: () => StandaloneHarness.openRuntime(options) } },
                 { id: 'provider.gears', version: '1', apiVersion: 1, roles: { provider: () => options.provider } },
                 { id: 'context.gears', version: '3', apiVersion: 1, configuration: JSON.stringify({ tokens: options.contextTokens ?? 16000, custom: options.context ? options.composition : undefined }), roles: { context: () => options.context ?? budgetedContext('', options.contextTokens ?? 16000, {
                     minRecentGroups: 3, // Two recent exchanges plus the transient state message.
@@ -190,6 +190,7 @@ export class StandaloneHarness {
                 throw new Error('Message must contain 1–8000 characters');
             await this.assertLease();
             const existing = await this.store.get(treeId);
+            if (existing) this.validateComposition(existing);
             if (existing && existing.ownerEpoch !== this.store.epoch && Object.values(existing.tasks).every(t => terminal(t.phase)))
                 await this.store.claim(existing);
             const tree = await this.store.change(treeId, 'message.received', tree => {
@@ -429,7 +430,7 @@ export class StandaloneHarness {
         if (!call)
             throw new Error('Missing tool call');
         const internal = internalDefinitions.some(t => t.name === call.name), plugin = this.plugins.get(call.name);
-        const finish = (current: Tree, result: ToolCallResult) => {
+        const finish = (current: Tree, result: ToolCallResult, uncertainOutcome?: string) => {
             const now = current.tasks[task.id];
             if (now.pending[0]?.id !== call.id)
                 throw new Error('Tool receipt lost ownership');
@@ -439,8 +440,10 @@ export class StandaloneHarness {
                 cancelTask(current, task.id);
                 now.error = 'Task expired';
             }
-            if (now.phase === 'tools' || now.phase === 'external')
-                now.phase = result.errorKind === 'unknown' ? 'unknown' : now.pending.length ? 'tools' : 'ready';
+            if (now.phase === 'tools' || now.phase === 'external') {
+                now.phase = uncertainOutcome ? 'unknown' : now.pending.length ? 'tools' : 'ready';
+                if (uncertainOutcome) now.error = uncertainOutcome;
+            }
             now.generation++;
         };
         const runtime: IValidatedToolRuntime = { tools: () => [], validate: (name, args) => {
@@ -497,9 +500,13 @@ export class StandaloneHarness {
                     if (now.pending[0]?.id !== call.id)
                         return; // Internal action and receipt already committed together.
                     await this.assertLease();
-                    await this.store.change(tree.id, 'tool.receipt', current => finish(current, event.execution.result ?? {
-                        ok: false, content: event.execution.error ?? 'Tool rejected', errorKind: 'policy'
-                    }), task.id, event);
+                    const execution = event.execution;
+                    // Use Agentic's classified receipt, including whether dispatch actually happened.
+                    const uncertainOutcome = execution.dispatched && ['unknown', 'timeout', 'cancelled'].includes(execution.status)
+                        ? `Tool '${call.name}' outcome is unknown after dispatch: ${execution.error ?? execution.status}` : undefined;
+                    await this.store.change(tree.id, 'tool.receipt', current => finish(current, execution.result ?? {
+                        ok: false, content: execution.error ?? 'Tool rejected', errorKind: 'policy'
+                    }, uncertainOutcome), task.id, event);
                 }
             } });
     }

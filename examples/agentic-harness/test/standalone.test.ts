@@ -98,6 +98,68 @@ it('never replays an uncertain effectful extension', async () => {
     await h.reconcile();
     expect(execute).toHaveBeenCalledOnce();
 });
+it.each(['unknown', 'timeout', 'cancelled'] as const)('stops after a dispatched %s tool receipt, including after reopen', async errorKind => {
+    const turn = vi.fn(async () => reply('', [tool('write_test', {}, 'first'), tool('write_test', {}, 'second')]));
+    const execute = vi.fn(async () => ({ ok: false as const, content: 'Acknowledgement missing', errorKind }));
+    const tools = [{ effect: 'write' as const, definition: { name: 'write_test', description: 'Write test', parameters: { type: 'object' as const } }, validate: (args: Record<string, unknown>) => args, execute }];
+    const first = await open(model(turn), undefined, { tools }), tree = await first.create('write');
+    await state(first, tree.id, t => expect(t.tasks[t.id].phase).toBe('unknown'));
+    const stopped = (await first.store.get(tree.id))!;
+    expect(stopped.tasks[tree.id].error).toContain('Acknowledgement missing');
+    expect(stopped.tasks[tree.id].pending.map(call => call.id)).toEqual(['second']);
+    const receipts = (await first.store.events(tree.id)).filter(event => event.type === 'tool.receipt');
+    expect(receipts).toHaveLength(1);
+    expect(receipts[0].data).toMatchObject({ execution: { status: errorKind, dispatched: true } });
+    expect(stopped.revision).toBe(receipts[0].sequence);
+    await first.close();
+    hosts.splice(hosts.indexOf(first), 1);
+    const second = await open(model(turn), first.options.dataDir, { tools });
+    await second.reconcile();
+    expect((await second.store.get(tree.id))!.tasks[tree.id].phase).toBe('unknown');
+    await expect(second.send(tree.id, tree.id, 'continue')).rejects.toThrow('requires review');
+    expect(turn).toHaveBeenCalledOnce();
+    expect(execute).toHaveBeenCalledOnce();
+});
+it('rejects incompatible completed-task continuation before claiming or mutating state', async () => {
+    const turn = vi.fn(async () => reply('done'));
+    const first = await open(model(turn), undefined, { composition: 'original' }), tree = await first.create('test');
+    await state(first, tree.id, t => expect(t.tasks[t.id].phase).toBe('completed'));
+    const before = await first.store.get(tree.id), events = await first.store.events(tree.id);
+    await first.close();
+    hosts.splice(hosts.indexOf(first), 1);
+    const incompatible = await open(model(turn), first.options.dataDir, { composition: 'changed' });
+    await expect(incompatible.send(tree.id, tree.id, 'follow up')).rejects.toThrow('original composition');
+    expect(await incompatible.store.get(tree.id)).toEqual(before);
+    expect(await incompatible.store.events(tree.id)).toEqual(events);
+    await incompatible.close();
+    hosts.splice(hosts.indexOf(incompatible), 1);
+    const restored = await open(model(turn), first.options.dataDir, { composition: 'original' });
+    await restored.send(tree.id, tree.id, 'follow up');
+    await state(restored, tree.id, t => {
+        expect(t.tasks[t.id].phase).toBe('completed');
+        expect(t.tasks[t.id].calls).toBe(2);
+    });
+    expect(turn).toHaveBeenCalledTimes(2);
+});
+it('preserves cancellation before tool dispatch without marking the outcome unknown', async () => {
+    const turn = vi.fn(async () => reply('', [tool('write_test', {})]));
+    const execute = vi.fn(async () => ({ ok: true as const, content: 'written' }));
+    const h = await open(model(turn), undefined, { tools: [{ effect: 'write', definition: { name: 'write_test', description: 'Write test', parameters: { type: 'object' } }, validate: args => args, execute }] });
+    const change = h.store.change.bind(h.store);
+    vi.spyOn(h.store, 'change').mockImplementation(async (...args) => {
+        const result = await change(...args);
+        if (args[1] === 'tool.intent') await h.cancel(args[0]);
+        return result;
+    });
+    const tree = await h.create('write');
+    await vi.waitFor(async () => {
+        const receipt = (await h.store.events(tree.id)).find(event => event.type === 'tool.receipt');
+        expect(receipt?.data).toMatchObject({ execution: { status: 'cancelled', dispatched: false } });
+    });
+    expect((await h.store.get(tree.id))!.tasks[tree.id].phase).toBe('cancelled');
+    expect(execute).not.toHaveBeenCalled();
+    expect(turn).toHaveBeenCalledOnce();
+});
 it('web extension requires authentication and exposes durable task state', async () => {
     const { attachWeb } = await import('../src/standalone/web.js');
     const h = await open(model(async () => reply('WEB_OK')));

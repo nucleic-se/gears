@@ -338,3 +338,17 @@ context reports, deadlines and completed receipts are archived outside source
 control. The preceding eager-retention run used 26 calls, 142,035 input tokens
 and three retrievals. Fewer calls did not mean fewer total tokens; these single
 stochastic runs do not establish a general cost or reliability improvement.
+
+### Expert-audit fixes
+
+Runtime version 6 records dispatched tool timeout/cancelled/unknown outcomes as
+stopped uncertainty in the same transaction as the tool receipt. It consumes
+Agentic's classified execution status rather than reinterpreting plugin output.
+Tests verify the receipt revision is atomic, remaining tool/model calls do not
+run and reopening does not replay the operation. Predispatch task cancellation
+retains its cancellation semantics.
+
+Follow-up submission now validates an existing tree's composition before claiming
+or mutating it. Tests verify that rejection leaves state and revision unchanged,
+and the original composition can later resume normally. Build and 56 harness
+tests passed. No deployed instance or existing runtime data was modified.
