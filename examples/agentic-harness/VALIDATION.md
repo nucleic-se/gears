@@ -404,3 +404,27 @@ and cancellation; Gears supplied durable execution and child coordination. The
 trusted local shell was authorized only for this isolated experiment; a working
 directory is not an OS sandbox. Next investigations should focus on bounded source
 inspection and repeated context cost in real tasks before adding more machinery.
+
+### Focused source inspection trials
+
+Two fresh Terra coding trials reused the same original source and objective with
+a 16k context ceiling and 200k task budget. Agentic now defaults UTF-8 file reads
+to 200 numbered lines with continuation, and supports explicit file paths in
+search (previously these silently returned no matches). No Gears tool wrapper or
+context policy was added. Both agents explicitly requested larger initial ranges,
+so these trials do not isolate the effect of the read-page default.
+
+Pagination alone completed tests and child review but exhausted the shared budget
+before finishing: 192,606 input and 2,902 output tokens. With single-file search
+fixed, the agent generated a failing test whose output was 37,447 characters.
+That recent diagnostic plus the following search exceeded context admission
+(approximately 17,494 against 16,000); usage at stop was 70,916 input and 1,457
+output tokens. Neither trial is a successful coding result; their patches were
+not adopted. All recorded model intents had matching receipts. Full evidence
+and patches remain outside source control.
+
+Agentic's 503 tests and the Gears build/57 tests pass. The primitive changes
+provide bounded default reads and correct focused searches, but no end-to-end
+cost improvement is established. Large recent diagnostics are the next observed
+context obstacle: presenting bounded output must preserve complete durable
+evidence for inspection and retrieval. Existing instances/data remain untouched.
