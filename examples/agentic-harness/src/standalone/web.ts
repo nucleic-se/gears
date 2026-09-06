@@ -43,7 +43,11 @@ export async function attachWeb(host: StandaloneHarness, options: {
                     result = await host.store.events(id, count(url.searchParams.get('after'), 0, Number.MAX_SAFE_INTEGER));
                 else if (req.method === 'GET' && parts[3] === 'artifact') {
                     const tree = await host.store.get(id);
-                    result = { content: tree?.artifacts[url.searchParams.get('name') ?? ''] };
+                    const name = url.searchParams.get('name') ?? '';
+                    if (!tree || !Object.hasOwn(tree.artifacts, name) || typeof tree.artifacts[name] !== 'string') {
+                        res.writeHead(404); res.end(); return;
+                    }
+                    result = { content: tree.artifacts[name] };
                 }
                 else if (req.method === 'POST' && parts[3] === 'cancel') {
                     const body = await json(req);

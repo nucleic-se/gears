@@ -125,3 +125,27 @@ full context accounting, and exact request preservation after reopening storage.
 Both browser flows were exercised in headless Chrome at 390×844, including request
 expansion and JSON download, with no page errors. These checks used deterministic
 fixture providers; no live model was needed for inspection verification.
+
+### Terra long-task baseline — 6 September 2026
+
+The unchanged source-review/restart scenario passed on `gpt-5.6-terra` with the
+existing 90-second request deadline and 200,000-token tree budget. Both children
+completed and saved findings; the parent waited, scheduled continuation, survived
+SIGKILL/restart, read evidence and saved `review.md` before completing.
+
+- Elapsed: 133 seconds; 21 model calls.
+- Reported usage: 107,321 input and 6,583 output tokens.
+- Maximum request duration: parent 15.3 seconds; children 51.6 and 39.2 seconds.
+- The parent used 12 calls; its estimated selected input grew from 1,188 to 13,969
+  tokens. Repeated context remains a measurable cost even in this passing run.
+
+The full report and per-task trace summary are retained outside source control.
+This is one structural acceptance pass, not a controlled model comparison or an
+independent assessment of the generated review's correctness. Earlier Astra
+failures remain recorded. No limits were raised to obtain this result.
+
+A subsequent focused hardening change uses own-property checks for artifact
+membership and reads. Missing inherited names return HTTP 404; legitimate saved
+names such as `constructor` remain readable after storage reload and count toward
+the 32-artifact limit. The harness build and 29 tests passed. The live run preceded
+this small artifact fix; its behavior is covered by the regression test.

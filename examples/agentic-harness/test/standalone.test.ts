@@ -260,3 +260,32 @@ it('exposes exact in-flight requests through authenticated inspection and preser
         expect(recovered.events.find(event => event.type === 'model.intent')?.data).toEqual(intent.data);
     } finally { release(); await web.close(); }
 });
+
+it('counts inherited artifact names as new entries and preserves own entries after storage reload', async () => {
+    const { internalAction } = await import('../src/standalone/tools.js');
+    const { attachWeb } = await import('../src/standalone/web.js');
+    const h = await open(model(async () => reply('done')));
+    const tree = await h.create('artifact lookup');
+    await state(h, tree.id, current => expect(current.tasks[tree.id].phase).toBe('completed'));
+    const web = await attachWeb(h, { token: 'artifact-test', port: 0 });
+    const port = (web.server.address() as { port: number }).port;
+    const read = (name: string) => fetch(`http://127.0.0.1:${port}/api/tasks/${tree.id}/artifact?name=${name}`, { headers: { Authorization: 'Bearer artifact-test' } });
+    try {
+        const snapshot = (await h.store.get(tree.id))!;
+        for (const name of ['constructor', 'toString', '__proto__']) {
+            expect(() => internalAction(snapshot, snapshot.tasks[tree.id], 'read_artifact', { name, offset: 0 }, 'read')).toThrow('does not exist');
+            expect((await read(name)).status).toBe(404);
+        }
+        await h.store.change(tree.id, 'fixture.artifacts', current => {
+            internalAction(current, current.tasks[tree.id], 'save_artifact', { name: 'constructor', content: 'actual saved text' }, 'save');
+            for (let index = 1; index < 32; index++)
+                internalAction(current, current.tasks[tree.id], 'save_artifact', { name: `file-${index}`, content: 'text' }, `save-${index}`);
+        });
+        const loaded = (await h.store.get(tree.id))!;
+        expect(JSON.parse(internalAction(loaded, loaded.tasks[tree.id], 'read_artifact', { name: 'constructor', offset: 0 }, 'read')).content).toBe('actual saved text');
+        expect(await (await read('constructor')).json()).toEqual({ content: 'actual saved text' });
+        expect(() => internalAction(loaded, loaded.tasks[tree.id], 'save_artifact', { name: 'toString', content: 'new' }, 'new')).toThrow('count limit');
+        expect(() => internalAction(loaded, loaded.tasks[tree.id], 'save_artifact', { name: 'constructor', content: 'replacement' }, 'replace')).not.toThrow();
+        expect(Object.keys(loaded.artifacts)).toHaveLength(32);
+    } finally { await web.close(); }
+});

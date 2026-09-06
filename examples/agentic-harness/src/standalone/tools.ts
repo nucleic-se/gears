@@ -128,14 +128,14 @@ export function internalAction(tree: Tree, task: Task, name: string, args: Recor
             const name = args.name as string;
             if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,99}$/.test(name))
                 throw new Error('Use a plain artifact name');
-            if (Object.keys(tree.artifacts).length >= 32 && !(name in tree.artifacts))
+            if (Object.keys(tree.artifacts).length >= 32 && !Object.hasOwn(tree.artifacts, name))
                 throw new Error('Artifact count limit reached');
             tree.artifacts[name] = args.content as string;
             return `Saved ${name}`;
         }
         case 'read_artifact': {
             const content = tree.artifacts[args.name as string];
-            if (content === undefined)
+            if (!Object.hasOwn(tree.artifacts, args.name as string) || typeof content !== 'string')
                 throw new Error('Artifact does not exist');
             const offset = args.offset as number;
             return JSON.stringify({ totalCharacters: content.length, offset, content: content.slice(offset, offset + 12000) });
