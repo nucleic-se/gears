@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
 import type { Tree } from './state.js';
 const workspace = resolve(process.argv[2] ?? process.cwd()), dataDir = await mkdtemp(join(tmpdir(), 'gears-agent-dogfood-'));
+const model = process.env.AGENTIC_EVAL_MODEL ?? 'gpt-5.6-terra';
 const deadline = AbortSignal.timeout(300000);
 let child: ChildProcess | undefined;
 function message(type: string): Promise<any> {
@@ -29,7 +30,7 @@ function message(type: string): Promise<any> {
         deadline.addEventListener('abort', abort, { once: true });
     });
 }
-async function start() { child = fork(fileURLToPath(new URL('./cli.js', import.meta.url)), ['--data', dataDir, '--workspace', workspace, '--no-web'], { stdio: ['ignore', 'ignore', 'inherit', 'ipc'] }); await message('ready'); }
+async function start() { child = fork(fileURLToPath(new URL('./cli.js', import.meta.url)), ['--data', dataDir, '--workspace', workspace, '--model', model, '--no-web'], { stdio: ['ignore', 'ignore', 'inherit', 'ipc'] }); await message('ready'); }
 async function inspect(id: string) {
     const result = message('state');
     child!.send({ type: 'inspect', id });
@@ -47,7 +48,7 @@ let latestTree: Tree | undefined;
 async function saveReport(passed: boolean, error?: unknown) {
     const children = Object.values(latestTree?.tasks ?? {}).filter(task => task.parentId === id);
     const report = {
-        scenario: 'source-review-with-restart', passed, id, dataDir, restarted,
+        scenario: 'source-review-with-restart', model, passed, id, dataDir, restarted,
         elapsedMs: Date.now() - startedAt,
         error: error instanceof Error ? error.message : error === undefined ? undefined : String(error),
         modelCalls: latestTree?.modelCalls, usage: latestTree?.usage,
@@ -69,7 +70,7 @@ try {
 First delegate exactly two independent subtasks using spawn_agent. One child reviews persistence, budgets and recovery in host.ts/state.ts; the other reviews tools, delegation and web boundaries in tools.ts/web.ts. Give each child tools ["read_file","list_files","save_artifact","save_progress"] and maxCalls 16, and enough context. Limit the review to the named files; do not audit dependencies. Children must inspect actual files and save findings to distinct artifacts.
 Wait for both using wait_agents. Read their findings, save_progress with a useful summary, then call schedule_self ONCE with delaySeconds 30 and reason "Resume after restart acceptance check". Do not finish before the scheduled continuation. After waking, synthesize the findings into artifact review.md and give a concise final answer. Assess child findings as evidence, not unquestioned truth.` });
     id = (await created).id;
-    console.log(JSON.stringify({ stage: 'started', id, dataDir }));
+    console.log(JSON.stringify({ stage: 'started', model, id, dataDir }));
     let last = '';
     while (true) {
         deadline.throwIfAborted();

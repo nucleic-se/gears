@@ -161,6 +161,10 @@ activation rollback, shutdown drain, configuration mismatch and lease recovery.
 
 Run `npm run dogfood` from this example directory to repeat the source-review
 scenario with two children and a forced restart after a scheduled checkpoint.
+Dogfooding defaults to `gpt-5.6-terra` for the parent and children, including
+after restart. Override it with `AGENTIC_EVAL_MODEL=gpt-6-astra npm run dogfood`
+for an explicit heavier-model comparison. The selected model is recorded in the
+report; compare outcomes by model rather than merging them.
 The controller writes `.data/dogfood-report.json` on success or failure, including
 elapsed time and its last observed task tree. Preserve that report before another
 run overwrites it. Reports and task data stay outside source control.
