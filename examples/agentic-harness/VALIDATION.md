@@ -428,3 +428,25 @@ provide bounded default reads and correct focused searches, but no end-to-end
 cost improvement is established. Large recent diagnostics are the next observed
 context obstacle: presenting bounded output must preserve complete durable
 evidence for inspection and retrieval. Existing instances/data remain untouched.
+
+### Recoverable output presentation
+
+Context version 4 opts into Agentic's shared 4,000-character tool-result
+presentation. Recent errors keep their identity/error flag and head/tail evidence,
+with a reference to the untouched stored result. Retrieval grants are required;
+retrieval responses and native content are excluded. Older successful previews
+can still shrink under the existing priority-based budget policy.
+
+Replaying the recorded diagnostic failure reproduces rejection at approximately
+17,494 tokens without presentation and fits at 13,593 with it. A fresh Terra coding
+trial completed at the unchanged 16k context/200k shared budget: 21 model calls,
+160,060 input and 2,556 output tokens, peak prepared context 15,355. All 21 intents
+had matching receipts. It implemented the bounded change, ran 57 tests/build and
+collected a child review; the independent pagination oracle also passed.
+
+The library validation suites pass: 505 Agentic tests and 58 Gears tests, including
+recent-error recovery from exact durable evidence and recovery after reopen.
+This is one successful trial, not a cost improvement over the earlier 32k success.
+Evidence remains outside source control. Source-tool capture limits and child
+completion message budgeting are unchanged; references promise saved results,
+not output already discarded upstream. Existing instances/data were untouched.

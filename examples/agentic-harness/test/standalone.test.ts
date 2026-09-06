@@ -423,11 +423,11 @@ it('recovers referenced evidence from durable history without rerunning the sour
             switch (calls++) {
                 case 0: return reply('', [tool('evidence', {})]);
                 case 1:
-                    expect(request.messages.find(message => message.role === 'tool_result')?.content).toBe(evidence);
+                    expect(request.messages.find(message => message.role === 'tool_result')?.content).toContain('read_tool_result({"messageIndex":2,"offset":0})');
                     return reply('', [tool('save_progress', { notes: 'Verify the exact end of the earlier evidence.' })]);
                 case 2:
-                    expect(request.messages.find(message => message.role === 'tool_result')?.content).toBe(evidence);
-                    // Grow protected state to force retention only after the source is no longer recent.
+                    expect(request.messages.find(message => message.role === 'tool_result')?.content).toContain('read_tool_result({"messageIndex":2,"offset":0})');
+                    // Grow protected state; the saved source must remain retrievable after it is no longer recent.
                     return reply('', [tool('save_progress', { notes: 'Now recover the saved tail. ' + 'n'.repeat(7000) }, 'progress-again')]);
                 case 3:
                     expect(request.messages.find(message => message.role === 'tool_result')?.content).toContain('read_tool_result({"messageIndex":2,"offset":0})');
@@ -556,4 +556,33 @@ it('honors requested byte limits and continues across UTF-8 boundaries', async (
     await expect(read.execute(read.validate({ path: 'text', offset: 3, limit: 1 }), signal)).rejects.toThrow('increase limit');
     for (const limit of [0, -1, 1.5, 16001]) expect(() => read.validate({ path: 'text', limit })).toThrow();
     expect(read.validate({ path: 'text' }).limit).toBe(16000);
+});
+
+it('presents recent diagnostics within context while retaining exact retrievable evidence', async () => {
+    const diagnostic = 'Assertion failed at test.ts:12\n' + 'x'.repeat(37000) + '\nExit code: 1';
+    let turn = 0;
+    const h = await open(model(async request => {
+        if (turn++ === 0) return reply('', [tool('diagnostic', {})]);
+        if (turn === 2) {
+            const result = request.messages.find(m => m.role === 'tool_result' && m.toolName === 'diagnostic')!;
+            expect(result.content.length).toBeLessThanOrEqual(4000);
+            expect(result.content).toContain('Assertion failed at test.ts:12');
+            expect(result.content).toContain('Exit code: 1');
+            expect(result.content).toContain('read_tool_result');
+            expect(result).toMatchObject({ isError: true });
+            return reply('', [tool('read_tool_result', { messageIndex: 2, offset: 30000 })]);
+        }
+        const recovered = request.messages.find(m => m.role === 'tool_result' && m.toolName === 'read_tool_result')!;
+        expect(JSON.parse(recovered.content).content).toBe(diagnostic.slice(30000, 38000));
+        return reply('diagnostic recovered');
+    }), undefined, { contextTokens: 8000, tools: [{
+        definition: { name: 'diagnostic', description: 'Return test failure evidence', parameters: { type: 'object', properties: {} } },
+        effect: 'read', validate: args => args,
+        execute: async () => ({ ok: false, errorKind: 'runtime', content: diagnostic }),
+    }] });
+    const tree = await h.create('repair');
+    await state(h, tree.id, current => expect(current.tasks[tree.id].phase).toBe('completed'));
+    const snapshot = await h.inspect(tree.id);
+    expect(snapshot.state.tasks[tree.id].messages[2].content).toBe(diagnostic);
+    expect(JSON.stringify(snapshot.events.filter(e => e.type === 'model.intent'))).toContain('originalCharacters');
 });

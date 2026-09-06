@@ -301,3 +301,14 @@ Continue with `nextOffset` until `eof`; offsets count UTF-16 code units and each
 page contains at most 12,000 units. An offset exactly at the end returns an empty
 EOF page; an offset beyond the end is rejected. Runtime version 7 requires the
 original composition for older persisted tasks, as described above.
+
+
+The context composition (version 4) presents recoverable text tool results using
+Agentic's `maxToolResultCharacters: 4000`. Large recent diagnostics receive a
+head/tail preview with an exact `read_tool_result` reference. Raw stored messages
+remain inspectable and retrievable; retrieval responses are not recursively
+shortened. The reference promises the saved tool result, not bytes a source tool
+already discarded (for example, the coding runtime's existing shell capture cap).
+The default read-only CLI remains unchanged. Older persisted tasks require their
+original context composition. Child-completion messages are not yet budgeted as
+a batch by this option.
