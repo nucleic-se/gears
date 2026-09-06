@@ -586,3 +586,40 @@ it('presents recent diagnostics within context while retaining exact retrievable
     expect(snapshot.state.tasks[tree.id].messages[2].content).toBe(diagnostic);
     expect(JSON.stringify(snapshot.events.filter(e => e.type === 'model.intent'))).toContain('originalCharacters');
 });
+
+it('retrieves spilled coding output after reopen without projecting the retrieval or rerunning the command', async () => {
+    const { codingToolRuntime } = await import('@nucleic-se/agentic/harness');
+    const { writeFile, readFile } = await import('node:fs/promises');
+    const workspace = await mkdtemp(join(tmpdir(), 'gears-output-')); paths.push(workspace);
+    const source = 'a'.repeat(70000) + '"'.repeat(4000);
+    await writeFile(join(workspace, 'run.cjs'), `require('node:fs').appendFileSync('runs','1'); process.stdout.write(${JSON.stringify(source)});`);
+    const makeTools = () => {
+        const runtime = codingToolRuntime(workspace, { outputDirectory: join(workspace, 'output') });
+        return runtime.tools().filter(t => ['shell_run', 'read_output'].includes(t.name)).map(definition => ({
+            definition, effect: definition.name === 'read_output' ? 'read' as const : 'write' as const,
+            validate(args: Record<string, unknown>) { const checked = runtime.validate(definition.name, args); if (!checked.ok) throw new Error(checked.result.content); return checked.args; },
+            execute: (args: Record<string, unknown>, signal: AbortSignal) => runtime.call(definition.name, args, { signal, authorizedArgs: args }),
+        }));
+    };
+    let outputId = '', turn = 0;
+    const provider = model(async request => {
+        if (turn++ === 0) return reply('', [tool('shell_run', { command: 'node run.cjs' })]);
+        if (turn === 2) {
+            const output = request.messages.find(m => m.role === 'tool_result' && m.toolName === 'shell_run')!;
+            outputId = output.content.match(/"id":"([^"]+)"/)![1];
+            return reply('saved output');
+        }
+        if (turn === 3) return reply('', [tool('read_output', { id: outputId, offset: 70000 })]);
+        const output = request.messages.filter(m => m.role === 'tool_result' && m.toolName === 'read_output').at(-1)!;
+        expect(JSON.parse(output.content)).toMatchObject({ content: '"'.repeat(4000), eof: true });
+        return reply('retrieved exact output');
+    });
+    const first = await open(provider, undefined, { tools: makeTools(), composition: 'output-recovery-test' });
+    const tree = await first.create('run');
+    await state(first, tree.id, current => expect(current.tasks[tree.id].phase).toBe('completed'));
+    await first.close(); hosts.splice(hosts.indexOf(first), 1);
+    const second = await open(provider, first.options.dataDir, { tools: makeTools(), composition: 'output-recovery-test' });
+    await second.send(tree.id, tree.id, 'retrieve');
+    await state(second, tree.id, current => expect(current.tasks[tree.id].answer).toBe('retrieved exact output'));
+    expect(await readFile(join(workspace, 'runs'), 'utf8')).toBe('1');
+});

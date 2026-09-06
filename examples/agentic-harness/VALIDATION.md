@@ -450,3 +450,23 @@ This is one successful trial, not a cost improvement over the earlier 32k succes
 Evidence remains outside source control. Source-tool capture limits and child
 completion message budgeting are unchanged; references promise saved results,
 not output already discarded upstream. Existing instances/data were untouched.
+
+
+### Saved shell output
+
+Agentic's coding runtime now retains oversized shell text behind `read_output`
+instead of discarding everything beyond 64 KiB. Its capture limit is 8 MiB;
+after completion, retained UTF-8 text is saved with a bounded head/tail preview.
+It explicitly reports capture incompleteness and storage failures. Context
+version 5 excludes this retrieval tool from recursive presentation.
+
+A Gears integration test runs a real command producing 74,000 bytes, closes and
+reopens the harness, retrieves the saved tail exactly, and verifies the command
+ran once. Escaped content tests that the retrieval response is not re-projected.
+Agentic tests also reconstruct output beyond the former cap, cover storage
+failure, overflow, missing IDs and symlink rejection. Validation: 509 Agentic and
+59 Gears tests. No live provider call or deployed-instance change was needed.
+
+This is bounded capture with persistence after completion, not crash-safe log
+streaming. Hosts own storage retention; output already beyond the capture limit
+cannot be recovered. The default Gears CLI remains read-only.
