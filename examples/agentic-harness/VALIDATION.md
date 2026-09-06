@@ -241,3 +241,20 @@ consistent long-task reliability. The next investigation should distinguish
 provider progress/deadline behavior from recovery policy before adding retries;
 a local abort does not prove upstream cancellation. Effectful tool recovery must
 remain a separate decision from model-only recovery.
+
+### Configurable operation deadlines
+
+Runtime version 5 replaces the hardcoded 90-second model limit with validated
+`modelTimeoutMs` (default 300,000), included in the composition fingerprint and
+available through CLI `--model-timeout-ms`. Model queue steps receive 30 seconds
+of additional headroom. Tools now run in separate queue steps with their existing
+120-second limit. Agentic's existing execution-signal primitive caps in-flight
+work by tree expiry. Receipts are retained without completing expired work.
+The full dogfood controller now allows 15 minutes overall; model, token and call
+limits remain independent. Automatic replay of unknown operations is unchanged.
+
+Build and 50 harness tests passed, including configured abort receipts, no replay
+after reopening, expiry during model/tool execution, queue headroom, recorded
+deadline metadata and refusal to reopen active tasks under a different timeout
+policy. This verifies local lifecycle contracts, not upstream cancellation or
+progress. No live reliability conclusion follows from these deterministic tests.

@@ -3,14 +3,14 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import type { ILLMProvider, TurnResponse, TurnRequest, ToolCall } from '@nucleic-se/agentic/llm';
-import { StandaloneHarness } from '../src/standalone/host.js';
+import { StandaloneHarness, type HarnessOptions } from '../src/standalone/host.js';
 import type { Tree } from '../src/standalone/state.js';
 const paths: string[] = [], hosts: StandaloneHarness[] = [];
 afterEach(async () => { for (const h of hosts.splice(0))
     await h.close(); for (const p of paths.splice(0))
     await rm(p, { recursive: true, force: true }); });
-async function open(provider: ILLMProvider, path?: string) { path ??= await mkdtemp(join(tmpdir(), 'standalone-test-')); if (!paths.includes(path))
-    paths.push(path); const h = await StandaloneHarness.open({ dataDir: path, provider }); hosts.push(h); return h; }
+async function open(provider: ILLMProvider, path?: string, options: Partial<HarnessOptions> = {}) { path ??= await mkdtemp(join(tmpdir(), 'standalone-test-')); if (!paths.includes(path))
+    paths.push(path); const h = await StandaloneHarness.open({ ...options, dataDir: path, provider }); hosts.push(h); return h; }
 const reply = (content: string, calls: ToolCall[] = []): TurnResponse => ({ message: { role: 'assistant', content, ...(calls.length ? { toolCalls: calls } : {}) }, stopReason: calls.length ? 'tool_use' : 'end_turn', usage: { inputTokens: 100, outputTokens: 20 } });
 const tool = (name: string, args: Record<string, unknown>, id = name): ToolCall => ({ id, name, args });
 const model = (turn: ILLMProvider['turn']): ILLMProvider => ({ turn, structured: async () => { throw new Error('unused'); } });
@@ -383,4 +383,71 @@ it.each([{ suffix: [0xff] }, { suffix: [0xe2, 0x82] }, { suffix: [0xc0, 0xaf] }]
     await writeFile(join(path, 'invalid'), Buffer.concat([Buffer.from('valid prefix'), Buffer.from(suffix)]));
     const read = (await workspaceTools(path)).find(tool => tool.definition.name === 'read_file')!;
     await expect(read.execute({ path: 'invalid', offset: 0 }, new AbortController().signal)).rejects.toThrow();
+});
+
+
+it.each([0, -1, 1.5, NaN, Infinity, 2147453648])('rejects invalid model timeout %s before opening resources', async modelTimeoutMs => {
+    await expect(StandaloneHarness.open({ dataDir: '/unused', provider: model(async () => reply('unused')), modelTimeoutMs })).rejects.toThrow('modelTimeoutMs');
+});
+it('derives queue headroom, records deadlines and runs tools in a separate queue step', async () => {
+    const turn = vi.fn(async (request: TurnRequest) => request.messages.some(m => m.role === 'tool_result') ? reply('done') : reply('', [tool('save_progress', { notes: 'saved' })]));
+    const h = await open(model(turn));
+    const bump = vi.spyOn(h.app.make('IQueue'), 'bump');
+    const tree = await h.create('deadline metadata');
+    await state(h, tree.id, t => expect(t.tasks[t.id].phase).toBe('completed'));
+    const timeouts = bump.mock.calls.map(call => call[4]?.executionTimeoutMs);
+    expect(timeouts).toContain(330000);
+    expect(timeouts).toContain(120000);
+    const data = (await h.store.events(tree.id)).find(event => event.type === 'model.intent')!.data as { deadline: number; modelTimeoutMs: number; intent: { startedAt: number } };
+    expect(data.modelTimeoutMs).toBe(300000);
+    expect(data.deadline - data.intent.startedAt).toBeGreaterThan(290000);
+    expect(data.deadline - data.intent.startedAt).toBeLessThanOrEqual(300000);
+});
+it('aborts at the configured model deadline and never replays the uncertain call on reopen', async () => {
+    const turn = vi.fn(async (_request: TurnRequest, options: Parameters<ILLMProvider['turn']>[1]) => new Promise<never>((_resolve, reject) => {
+        options!.signal!.addEventListener('abort', () => reject(options!.signal!.reason), { once: true });
+    }));
+    const first = await open(model(turn), undefined, { modelTimeoutMs: 100 });
+    const tree = await first.create('timeout');
+    await state(first, tree.id, t => expect(t.tasks[t.id].phase).toBe('unknown'));
+    const events = await first.store.events(tree.id);
+    expect(events.find(event => event.type === 'model.receipt')!.data).toMatchObject({ outcome: 'aborted', dispatched: true, failure: { kind: 'abort' } });
+    await first.close(); hosts.splice(hosts.indexOf(first), 1);
+    const second = await open(model(turn), first.options.dataDir, { modelTimeoutMs: 100 });
+    await second.reconcile();
+    expect(turn).toHaveBeenCalledOnce();
+});
+it('caps a live model call by tree expiry and records its receipt without completing expired work', async () => {
+    let actualDeadline = 0;
+    const h = await open(model(async (_request, options) => {
+        actualDeadline = options!.deadline!;
+        return new Promise<never>((_resolve, reject) => options!.signal!.addEventListener('abort', () => reject(options!.signal!.reason), { once: true }));
+    }));
+    const expiresAt = Date.now() + 300;
+    const tree = await h.create('expire', { expiresAt });
+    await state(h, tree.id, t => expect(t.tasks[t.id].phase).toBe('cancelled'));
+    expect(actualDeadline).toBe(expiresAt);
+    expect((await h.store.events(tree.id)).find(event => event.type === 'model.receipt')!.data).toMatchObject({ outcome: 'aborted' });
+});
+it('aborts an in-flight tool at tree expiry', async () => {
+    let aborted = false;
+    const h = await open(model(async () => reply('', [tool('slow_read', {})])), undefined, { tools: [{ effect: 'read',
+        definition: { name: 'slow_read', description: 'Slow read', parameters: { type: 'object' } }, validate: args => args,
+        execute: async (_args, signal) => new Promise<never>((_resolve, reject) => signal.addEventListener('abort', () => { aborted = true; reject(signal.reason); }, { once: true })),
+    }] });
+    const tree = await h.create('expire tool', { expiresAt: Date.now() + 400 });
+    await state(h, tree.id, t => expect(t.tasks[t.id].phase).toBe('cancelled'));
+    expect(aborted).toBe(true);
+    expect((await h.store.events(tree.id)).some(event => event.type === 'tool.receipt')).toBe(true);
+});
+
+it('refuses a timeout-policy change for a persisted active composition', async () => {
+    const provider = model(async () => reply('', [tool('schedule_self', { delaySeconds: 3600, reason: 'persist' })]));
+    const first = await open(provider, undefined, { modelTimeoutMs: 1000 });
+    const tree = await first.create('sleep');
+    await state(first, tree.id, t => expect(t.tasks[t.id].phase).toBe('sleeping'));
+    await first.close(); hosts.splice(hosts.indexOf(first), 1);
+    await expect(StandaloneHarness.open({ ...first.options, modelTimeoutMs: 2000 })).rejects.toThrow('original composition');
+    const second = await open(provider, first.options.dataDir, { modelTimeoutMs: 1000 });
+    expect((await second.store.get(tree.id))!.tasks[tree.id].phase).toBe('sleeping');
 });

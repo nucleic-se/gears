@@ -126,7 +126,14 @@ two delegation levels, and 24-hour expiry. Each task also has an individual call
 limit. Model calls reserve estimated input plus maximum output atomically across
 children, then reconcile reported usage. Token estimation is not a billing cap:
 a provider can report higher usage, which blocks subsequent admission. Unknown
-requests keep their reservation. Provider calls have a 90-second deadline.
+requests keep their reservation. Context preparation plus a provider call defaults to a five-minute absolute deadline.
+Set `modelTimeoutMs` in `HarnessOptions`, or CLI `--model-timeout-ms 300000`.
+The model queue step gets an additional 30 seconds for receipt/cleanup; tools run
+in separate steps with their existing 120-second queue timeout. Both model and
+tool execution are also cancelled at the tree's expiry, and receipts cannot mark
+expired work completed. Model intents record the effective deadline and configured
+limit. These are absolute deadlines, not progress-sensitive idle timers. Unknown
+outcomes are still never retried automatically.
 
 The tree journal favors simple atomicity over very large-scale storage. It stores
 bounded text artifacts in SQLite and retains event history. There is no automatic
@@ -142,7 +149,7 @@ npm --prefix examples/agentic-harness run dogfood -- .
 
 Run the dogfood command from this package directory, or pass its absolute path
 as the workspace. It uses your live subscription to review the harness itself,
-spawns two real model-driven children, collects their findings, saves progress,
+has a 15-minute overall controller deadline, spawns two real model-driven children, collects their findings, saves progress,
 and schedules a continuation. The controller kills the worker with SIGKILL at
 that checkpoint, waits for the Gears lease to expire, restarts the same CLI, and
 requires completed children and a final review artifact. The report is written
@@ -207,8 +214,9 @@ hits or token-cost savings are not guaranteed. Resource figures are a snapshot
 before request admission, and concurrent children can consume budget afterward.
 Admission still checks the authoritative shared state atomically.
 
-The Gears runtime extension is version 4 (version 3 introduced this request layout;
-version 4 fixes UTF-8 reads and makes admission failures specific). Active
+The Gears runtime extension is version 5 (version 4 fixed UTF-8 reads and admission
+diagnostics; version 5 adds timeout policy and separates model/tool steps). The
+configured model timeout is included in the composition fingerprint. Active
 trees from earlier compositions require their original revision; new dogfood
 runs use fresh data directories. Existing data is not migrated or deleted.
 

@@ -18,7 +18,8 @@ const webEnabled = !args.includes('--no-web');
 const token = webEnabled ? process.env.GEARS_AGENT_TOKEN ?? randomBytes(24).toString('hex') : undefined;
 const hostname = option('--host', '127.0.0.1'), port = Number(option('--port', '4318'));
 const model = option('--model', 'gpt-6-astra');
-const host = await StandaloneHarness.open({ dataDir, provider: new CodexSubscriptionProvider({ model, reasoningEffort: 'low' }),
+const modelTimeoutMs = Number(option('--model-timeout-ms', '300000'));
+const host = await StandaloneHarness.open({ dataDir, modelTimeoutMs, provider: new CodexSubscriptionProvider({ model, reasoningEffort: 'low' }),
     tools: await workspaceTools(workspace), composition: `default-v2:${workspace}:${model}`,
     extensions: webEnabled ? [{ id: 'ui.web', version: '1', apiVersion: 1, activate: async client => {
         const web = await attachWeb(client, { token: token!, port, hostname });

@@ -8,7 +8,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import type { Tree } from './state.js';
 const workspace = resolve(process.argv[2] ?? process.cwd()), dataDir = await mkdtemp(join(tmpdir(), 'gears-agent-dogfood-'));
 const model = process.env.AGENTIC_EVAL_MODEL ?? 'gpt-5.6-terra';
-const deadline = AbortSignal.timeout(300000);
+const deadline = AbortSignal.timeout(900000);
 let child: ChildProcess | undefined;
 function message(type: string) { return waitForWorkerMessage(child!, type, deadline); }
 async function start() { child = fork(fileURLToPath(new URL('./cli.js', import.meta.url)), ['--data', dataDir, '--workspace', workspace, '--model', model, '--no-web'], { stdio: ['ignore', 'ignore', 'inherit', 'ipc'] }); await message('ready'); }
