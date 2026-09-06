@@ -331,7 +331,7 @@ it('recovers referenced evidence from durable history without rerunning the sour
     const read = vi.fn(async () => ({ ok: true, content: evidence }));
     const path = await mkdtemp(join(tmpdir(), 'standalone-test-')); paths.push(path);
     let calls = 0;
-    const h = await StandaloneHarness.open({ dataDir: path,
+    const h = await StandaloneHarness.open({ dataDir: path, contextTokens: 7000,
         tools: [{ definition: { name: 'evidence', description: 'Read evidence', parameters: { type: 'object', properties: {} } }, effect: 'read', validate: () => ({}), execute: read }],
         provider: model(async request => {
             switch (calls++) {
@@ -341,7 +341,8 @@ it('recovers referenced evidence from durable history without rerunning the sour
                     return reply('', [tool('save_progress', { notes: 'Verify the exact end of the earlier evidence.' })]);
                 case 2:
                     expect(request.messages.find(message => message.role === 'tool_result')?.content).toBe(evidence);
-                    return reply('', [tool('save_progress', { notes: 'Now recover the saved tail.' }, 'progress-again')]);
+                    // Grow protected state to force retention only after the source is no longer recent.
+                    return reply('', [tool('save_progress', { notes: 'Now recover the saved tail. ' + 'n'.repeat(7000) }, 'progress-again')]);
                 case 3:
                     expect(request.messages.find(message => message.role === 'tool_result')?.content).toContain('read_tool_result({"messageIndex":2,"offset":0})');
                     return reply('', [tool('read_tool_result', { messageIndex: 2, offset: 8000 })]);

@@ -224,7 +224,9 @@ runs use fresh data directories. Existing data is not migrated or deleted.
 
 The built-in context policy can replace older large text results with short
 previews and `read_tool_result` references. It uses Agentic's shared retention
-policy and only does this when the current task has that tool. Include
+policy and only does this under budget pressure when the current task has that
+tool. Full evidence stays intact while it fits; Agentic references lower-priority
+groups first and stops once the request fits. Include
 `read_tool_result` in a delegated child's tools to enable recovery there; grants
 are never added implicitly. The two recent exchanges plus the transient state group stay intact, and context reports
 show exactly which older payloads were shortened.
@@ -236,7 +238,7 @@ files or rerun a tool, and continues to work after restart. Invalid indices and
 out-of-range offsets fail explicitly. Retrieved chunks are not recursively
 replaced with references. This retrieves text, not native media blocks.
 
-The context extension is version 2 for this policy; older active compositions
+The context extension is version 3 for pressure-driven retention; older active compositions
 must finish on their matching revision. This does not add semantic summaries,
 search across dropped history or a new memory store. Whole groups can still be
 dropped under the context ceiling, so it is not a guarantee of arbitrary-history

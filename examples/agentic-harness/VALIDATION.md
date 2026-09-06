@@ -315,3 +315,26 @@ are retained with exact context/deadline metadata outside source control.
 The prior failed run used 30 calls and 183,015 input tokens. These are individual
 stochastic runs over evolving source, not a controlled estimate of savings from
 the new limit. No token or call limits were raised.
+
+### Agentic owns pressure-driven retention
+
+Agentic now references eligible tool results only when the context exceeds its
+budget, following the existing ascending priority order and stopping immediately
+when it fits. No Gears selection algorithm, budget calculations or new policy
+flag were added. Gears changes only its context extension identity to version 3;
+the integration test now creates actual pressure before expecting a reference.
+Agentic build and 486 tests passed; Gears build and 51 tests passed.
+
+The deterministic fixture retains full evidence under the generous ceiling and
+still recovers its exact answer under the constrained ceiling. All three live
+fixture modes passed: full and recovery-enabled roomy contexts each answered in
+one call without retrieval; the pressured context answered after one retrieval
+in two calls. This checks behavior, not broad efficiency.
+
+The full Terra source-review/restart scenario passed in 169 seconds: both children
+completed, restart succeeded, and the final artifact was saved. It used 24 calls,
+149,600 input / 8,757 output tokens and two history retrievals. All 24 exact intents,
+context reports, deadlines and completed receipts are archived outside source
+control. The preceding eager-retention run used 26 calls, 142,035 input tokens
+and three retrievals. Fewer calls did not mean fewer total tokens; these single
+stochastic runs do not establish a general cost or reliability improvement.
