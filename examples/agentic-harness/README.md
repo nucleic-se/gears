@@ -146,7 +146,7 @@ spawns two real model-driven children, collects their findings, saves progress,
 and schedules a continuation. The controller kills the worker with SIGKILL at
 that checkpoint, waits for the Gears lease to expire, restarts the same CLI, and
 requires completed children and a final review artifact. The report is written
-to `.data/dogfood-report.json`. This is an acceptance scenario, not a general
+to `.data/dogfood/<run>.json`. This is an acceptance scenario, not a general
 coding-agent capability benchmark.
 
 Ordinary tests use fake providers with real Gears queues and databases. The
@@ -165,9 +165,8 @@ Dogfooding defaults to `gpt-5.6-terra` for the parent and children, including
 after restart. Override it with `AGENTIC_EVAL_MODEL=gpt-6-astra npm run dogfood`
 for an explicit heavier-model comparison. The selected model is recorded in the
 report; compare outcomes by model rather than merging them.
-The controller writes `.data/dogfood-report.json` on success or failure, including
-elapsed time and its last observed task tree. Preserve that report before another
-run overwrites it. Reports and task data stay outside source control.
+The controller writes `.data/dogfood/<run>.json` on success or failure, including
+elapsed time and its last observed task tree. Each run has its own report file, so later runs do not overwrite failures. Reports and task data stay outside source control.
 
 Context sizes are workload-dependent. The illustrative 128k-token / 4 MB example
 in design discussions is not a fixed limit or acceptance requirement.
@@ -208,8 +207,9 @@ hits or token-cost savings are not guaranteed. Resource figures are a snapshot
 before request admission, and concurrent children can consume budget afterward.
 Admission still checks the authoritative shared state atomically.
 
-The Gears runtime extension is version 3 for this request-layout change. Active
-trees from the prior composition require their original revision; new dogfood
+The Gears runtime extension is version 4 (version 3 introduced this request layout;
+version 4 fixes UTF-8 reads and makes admission failures specific). Active
+trees from earlier compositions require their original revision; new dogfood
 runs use fresh data directories. Existing data is not migrated or deleted.
 
 ### Recovering older tool evidence
@@ -233,3 +233,13 @@ must finish on their matching revision. This does not add semantic summaries,
 search across dropped history or a new memory store. Whole groups can still be
 dropped under the context ceiling, so it is not a guarantee of arbitrary-history
 recall.
+
+### Dogfood controller and admission failures
+
+The controller rejects waits when already cancelled, when a worker exits, or when
+launch fails. It drains normal shutdown and forcibly stops only its own disposable
+worker if that worker ignores shutdown for 15 seconds. Reports retain the last
+observed state on failure and are written to a unique file under `.data/dogfood/`.
+Model admission failures identify shared call limits, per-task call limits, token
+reservation shortages or expiry; token errors include required and remaining
+amounts. Rejected admission still does not dispatch a provider request.

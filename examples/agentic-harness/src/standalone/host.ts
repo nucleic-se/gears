@@ -48,7 +48,7 @@ export class StandaloneHarness {
         if (options.context && !options.composition) throw new Error('Custom context requires an explicit composition identity');
         return createHarness().compose({
             extensions: [
-                { id: 'runtime.gears', version: '3', apiVersion: 1, configuration: JSON.stringify({ outputTokens: options.outputTokens ?? 1800, tools: (options.tools ?? []).map(tool => ({ definition: tool.definition, effect: tool.effect })) }), roles: { runtime: () => StandaloneHarness.openRuntime(options) } },
+                { id: 'runtime.gears', version: '4', apiVersion: 1, configuration: JSON.stringify({ outputTokens: options.outputTokens ?? 1800, tools: (options.tools ?? []).map(tool => ({ definition: tool.definition, effect: tool.effect })) }), roles: { runtime: () => StandaloneHarness.openRuntime(options) } },
                 { id: 'provider.gears', version: '1', apiVersion: 1, roles: { provider: () => options.provider } },
                 { id: 'context.gears', version: '2', apiVersion: 1, configuration: JSON.stringify({ tokens: options.contextTokens ?? 16000, custom: options.context ? options.composition : undefined }), roles: { context: () => options.context ?? budgetedContext('', options.contextTokens ?? 16000, {
                     minRecentGroups: 3, // Two recent exchanges plus the transient state message.
@@ -348,8 +348,11 @@ export class StandaloneHarness {
                     const now = current.tasks[task.id];
                     if (now.phase !== 'ready' || now.generation !== task.generation)
                         throw new Error('Task already claimed or changed');
-                    if (current.modelCalls >= current.limits.modelCalls || now.calls >= now.maxCalls || current.chargedTokens + reservation > current.limits.tokens || Date.now() >= current.limits.expiresAt)
-                        throw new Error('Task budget exhausted');
+                    if (Date.now() >= current.limits.expiresAt) throw new Error('Task lifetime expired');
+                    if (current.modelCalls >= current.limits.modelCalls) throw new Error('Shared model-call budget exhausted');
+                    if (now.calls >= now.maxCalls) throw new Error('Task model-call budget exhausted');
+                    if (current.chargedTokens + reservation > current.limits.tokens)
+                        throw new Error(`Shared token budget exhausted: request needs ${reservation}, remaining ${Math.max(0, current.limits.tokens - current.chargedTokens)}`);
                     now.messages = messages;
                     now.inbox = (now.inbox ?? []).slice(task.inbox?.length ?? 0);
                     now.phase = 'model';

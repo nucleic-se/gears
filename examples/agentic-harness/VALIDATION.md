@@ -208,3 +208,36 @@ measures request size only; it does not predict how the agent would have behaved
 without retention. Reports and the comparison script remain outside source
 control. Deterministic recovery works, but retrieval overhead and semantic
 selection still require broader evaluation before claiming an efficiency gain.
+
+### Controlled evaluation and controller hardening
+
+Agentic now includes a deterministic six-case retention evaluation and an opt-in
+paired live fixture through shared harness execution. The live Terra check passed
+both modes: full evidence used one call and 2,748 input / 56 output tokens;
+recoverable evidence used two calls, including retrieval, and 2,363 input / 45
+output tokens. This fixed-order single trial does not establish a general cost,
+latency or capability advantage.
+
+Gears rejects malformed UTF-8 at EOF instead of silently returning a shortened
+successful read, while preserving valid character boundaries between chunks.
+Regression cases failed against the previous reader and pass with the fix.
+The dogfood controller now handles already-aborted waits, process exit and spawn
+errors, removes listeners on settlement, and escalates an unresponsive disposable
+worker's graceful shutdown after 15 seconds. Reports have unique per-run paths.
+Admission failures identify lifetime, shared/task call limits or token reservation
+shortfalls. Runtime version 4 makes the changed composition explicit.
+
+Validation: Agentic build and 483 tests; Gears harness build and 39 tests passed.
+The subsequent full Terra scenario **failed acceptance** after 213 seconds:
+the parent completed and checkpoint restart succeeded, one child completed, and
+one became unknown following the existing 90-second model deadline. The aborted
+receipt took 90,004 ms. Total usage was 24 calls, 135,819 input / 6,264 output
+tokens. The complete failed report is retained outside source control alongside
+the controlled evaluation evidence. Generated review findings remain unverified
+model output, not adopted audit conclusions.
+
+No limits or retry semantics were changed. Earlier passing runs do not establish
+consistent long-task reliability. The next investigation should distinguish
+provider progress/deadline behavior from recovery policy before adding retries;
+a local abort does not prove upstream cancellation. Effectful tool recovery must
+remain a separate decision from model-only recovery.

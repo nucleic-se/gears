@@ -51,6 +51,7 @@ it('shares a hard model-call admission budget across children', async () => {
     const h = await open(model(turn)), tree = await h.create('parent', { modelCalls: 1 });
     await state(h, tree.id, t => expect(Object.values(t.tasks).every(s => s.phase === 'failed')).toBe(true));
     expect(turn).toHaveBeenCalledOnce();
+    expect(Object.values((await h.store.get(tree.id))!.tasks).some(task => task.error === 'Shared model-call budget exhausted')).toBe(true);
 });
 it('does not replay an ambiguous provider request after reopen', async () => {
     const turn = vi.fn(async () => { throw new Error('transport lost'); });
@@ -182,6 +183,8 @@ it('reserves shared token budget before concurrent child dispatch', async () => 
     try {
         await h.reconcile();
         await state(h, tree.id, t => expect(['left', 'right'].filter(id => t.tasks[id].phase === 'failed')).toHaveLength(1));
+        const blocked = Object.values((await h.store.get(tree.id))!.tasks).find(task => task.phase === 'failed');
+        expect(blocked?.error).toMatch(/Shared token budget exhausted: request needs \d+, remaining \d+/);
         expect(turn).toHaveBeenCalledOnce();
     }
     finally {
@@ -371,4 +374,13 @@ it('recovers referenced evidence from durable history without rerunning the sour
     const other = await reopened.store.create('Other task', [], reopened.compositionId);
     expect(() => internalAction(other, other.tasks[other.id], 'read_tool_result', { messageIndex: 2, offset: 0 }, 'isolated')).toThrow('does not exist');
     expect(read).toHaveBeenCalledOnce();
+});
+
+it.each([{ suffix: [0xff] }, { suffix: [0xe2, 0x82] }, { suffix: [0xc0, 0xaf] }])('rejects malformed UTF-8 at EOF rather than returning a shortened success: $suffix', async ({ suffix }) => {
+    const { workspaceTools } = await import('../src/standalone/tools.js');
+    const { writeFile } = await import('node:fs/promises');
+    const path = await mkdtemp(join(tmpdir(), 'standalone-test-')); paths.push(path);
+    await writeFile(join(path, 'invalid'), Buffer.concat([Buffer.from('valid prefix'), Buffer.from(suffix)]));
+    const read = (await workspaceTools(path)).find(tool => tool.definition.name === 'read_file')!;
+    await expect(read.execute({ path: 'invalid', offset: 0 }, new AbortController().signal)).rejects.toThrow();
 });

@@ -198,18 +198,17 @@ export async function workspaceTools(directory: string): Promise<HarnessTool[]> 
                     signal.throwIfAborted();
                     const buffer = Buffer.alloc(16000), read = await file.read(buffer, 0, buffer.length, args.offset as number);
                     signal.throwIfAborted();
-                    let consumed = read.bytesRead, content: string | undefined;
                     const decoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
-                    for (let trim = 0; trim <= 3 && trim <= read.bytesRead; trim++) {
-                        try {
-                            consumed = read.bytesRead - trim;
-                            content = decoder.decode(buffer.subarray(0, consumed));
-                            break;
-                        }
-                        catch { }
-                    }
-                    if (content === undefined || (read.bytesRead > 0 && consumed === 0))
+                    let content: string;
+                    try {
+                        // Buffer only a valid partial character at a chunk boundary, never invalid bytes at EOF.
+                        const more = (args.offset as number) + read.bytesRead < stat.size;
+                        content = decoder.decode(buffer.subarray(0, read.bytesRead), { stream: more });
+                    } catch {
                         throw new Error('File is not UTF-8 or offset splits a character');
+                    }
+                    const consumed = Buffer.byteLength(content, 'utf8');
+                    if (read.bytesRead > 0 && consumed === 0) throw new Error('File is not UTF-8 or offset splits a character');
                     const nextOffset = (args.offset as number) + consumed;
                     return { ok: true, content: JSON.stringify({ bytes: stat.size, offset: args.offset, bytesRead: consumed, nextOffset, eof: nextOffset >= stat.size, content }) };
                 }

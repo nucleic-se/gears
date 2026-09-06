@@ -1,7 +1,8 @@
+import { waitForWorkerMessage, stopWorker } from './dogfood-process.js';
 import { fork, type ChildProcess } from 'node:child_process';
 import { mkdtemp, mkdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { resolve, join } from 'node:path';
+import { resolve, join, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
 import type { Tree } from './state.js';
@@ -9,39 +10,19 @@ const workspace = resolve(process.argv[2] ?? process.cwd()), dataDir = await mkd
 const model = process.env.AGENTIC_EVAL_MODEL ?? 'gpt-5.6-terra';
 const deadline = AbortSignal.timeout(300000);
 let child: ChildProcess | undefined;
-function message(type: string): Promise<any> {
-    return new Promise((resolve, reject) => {
-        const current = child!;
-        const cleanup = () => { current.off('message', receive); current.off('exit', exit); deadline.removeEventListener('abort', abort); };
-        const receive = (value: any) => {
-            if (value.type === 'error') {
-                cleanup();
-                reject(new Error(value.error));
-            }
-            else if (value.type === type) {
-                cleanup();
-                resolve(value);
-            }
-        };
-        const exit = () => { cleanup(); reject(new Error('Worker exited before response')); };
-        const abort = () => { cleanup(); reject(deadline.reason); };
-        current.on('message', receive);
-        current.once('exit', exit);
-        deadline.addEventListener('abort', abort, { once: true });
-    });
-}
+function message(type: string) { return waitForWorkerMessage(child!, type, deadline); }
 async function start() { child = fork(fileURLToPath(new URL('./cli.js', import.meta.url)), ['--data', dataDir, '--workspace', workspace, '--model', model, '--no-web'], { stdio: ['ignore', 'ignore', 'inherit', 'ipc'] }); await message('ready'); }
 async function inspect(id: string) {
     const result = message('state');
     child!.send({ type: 'inspect', id });
-    return await result as {
+    return await result as unknown as {
         tree: Tree;
         queue: {
             overview: Record<string, number>;
         };
     };
 }
-async function stop(signal: NodeJS.Signals) { const current = child!; const exited = new Promise<void>(r => current.once('exit', () => r())); current.kill(signal); await exited; child = undefined; }
+async function stop(signal: NodeJS.Signals) { if (child) await stopWorker(child, signal); child = undefined; }
 const startedAt = Date.now();
 let id = '', restarted = false;
 let latestTree: Tree | undefined;
@@ -57,8 +38,9 @@ async function saveReport(passed: boolean, error?: unknown) {
         // Preserve the last observation even when the worker can no longer answer IPC.
         tree: latestTree,
     };
-    const output = resolve('.data/dogfood-report.json');
-    await mkdir(resolve('.data'), { recursive: true });
+    const directory = resolve('.data/dogfood');
+    const output = join(directory, basename(dataDir) + '.json');
+    await mkdir(directory, { recursive: true });
     await writeFile(output, JSON.stringify(report, null, 2) + '\n');
     console.log(JSON.stringify({ stage: 'finished', passed, report: output, modelCalls: report.modelCalls, usage: report.usage }));
 }
@@ -69,7 +51,9 @@ try {
     child!.send({ type: 'create', prompt: `Audit this standalone harness in src/standalone/host.ts, state.ts, tools.ts and web.ts. Identify concrete correctness risks and recommend three improvements with file references. Do not modify source files.
 First delegate exactly two independent subtasks using spawn_agent. One child reviews persistence, budgets and recovery in host.ts/state.ts; the other reviews tools, delegation and web boundaries in tools.ts/web.ts. Give each child tools ["read_file","list_files","save_artifact","save_progress"] and maxCalls 16, and enough context. Limit the review to the named files; do not audit dependencies. Children must inspect actual files and save findings to distinct artifacts.
 Wait for both using wait_agents. Read their findings, save_progress with a useful summary, then call schedule_self ONCE with delaySeconds 30 and reason "Resume after restart acceptance check". Do not finish before the scheduled continuation. After waking, synthesize the findings into artifact review.md and give a concise final answer. Assess child findings as evidence, not unquestioned truth.` });
-    id = (await created).id;
+    const createdId = (await created).id;
+    if (typeof createdId !== 'string' || !createdId) throw new Error('Worker returned an invalid task ID');
+    id = createdId;
     console.log(JSON.stringify({ stage: 'started', model, id, dataDir }));
     let last = '';
     while (true) {
