@@ -6,7 +6,9 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "test": "tsc -p tsconfig.tests.json && vitest run",
-    "demo": "node dist/main.js"
+    "demo": "node dist/main.js",
+    "agent": "node dist/standalone/cli.js",
+    "dogfood": "npm run build && node dist/standalone/dogfood.js"
   },
   "dependencies": {
     "@nucleic-se/gears": "file:../..",
