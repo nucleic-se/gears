@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { sql, type Kysely } from 'kysely';
-import type { Message, ToolCall, TokenUsage } from '@nucleic-se/agentic/llm';
+import type { Message, UserMessage, ToolCall, TokenUsage } from '@nucleic-se/agentic/llm';
+import type { WorkingCheckpoint } from '@nucleic-se/agentic/harness';
 import type { ExecutionJournal } from '@nucleic-se/agentic/execution';
 export type Phase = 'ready' | 'model' | 'tools' | 'external' | 'waiting' | 'sleeping' | 'completed' | 'failed' | 'unknown' | 'cancelled';
 export interface Task {
@@ -10,9 +11,10 @@ export interface Task {
     objective: string;
     phase: Phase;
     messages: Message[];
-    inbox?: string[];
+    inbox?: UserMessage[];
     pending: ToolCall[];
     notes: string;
+    checkpoint?: WorkingCheckpoint;
     children: string[];
     tools: string[];
     depth: number;
@@ -69,7 +71,7 @@ export interface HarnessDatabase {
 }
 export const terminal = (phase: Phase) => ['completed', 'failed', 'unknown', 'cancelled'].includes(phase);
 export function newTask(id: string, objective: string, tools: string[], options: Partial<Task> = {}): Task {
-    return { id, title: objective.slice(0, 80), objective, phase: 'ready', messages: [{ role: 'user', content: objective, sticky: true }],
+    return { id, title: objective.slice(0, 80), objective, phase: 'ready', messages: [{ role: 'user', provenance: 'human', content: objective, sticky: true }],
         pending: [], notes: '', children: [], tools, depth: 0, calls: 0, maxCalls: 30, generation: 0, ...options };
 }
 export class Conflict extends Error {

@@ -32,6 +32,7 @@ it('delegates two children, collects results, sleeps without a worker and resume
         expect(request.messages.at(-1)?.content).toContain('Both children collected');
         expect(JSON.stringify(request.messages)).toContain('result child A');
         expect(JSON.stringify(request.messages)).toContain('result child B');
+        expect(request.messages.find(m => m.content.startsWith('Scheduled continuation'))?.provenance).toBe('deterministic');
         return reply('DONE');
     }));
     const first = await open(provider), tree = await first.create('parent');
@@ -59,6 +60,25 @@ it('shares a hard model-call admission budget across children', async () => {
     expect(turn).toHaveBeenCalledOnce();
     expect(Object.values((await h.store.get(tree.id))!.tasks).some(task => task.error === 'Shared model-call budget exhausted')).toBe(true);
 });
+it('settles usage above the reservation and blocks further admission after reopen', async () => {
+    const turn = vi.fn(async () => ({ ...reply('', [tool('save_progress', { notes: 'Known work saved' })]),
+        usage: { inputTokens: 100, outputTokens: 4000 } }));
+    const first = await open(model(turn));
+    const tree = await first.store.create('Continue after saving progress', ['save_progress'], first.compositionId, { tokens: 3000 });
+    await first.reconcile();
+    await state(first, tree.id, current => expect(current.tasks[tree.id].phase).toBe('failed'));
+    const saved = (await first.store.get(tree.id))!;
+    expect(saved.chargedTokens).toBe(4100);
+    expect(saved.usage).toEqual({ inputTokens: 100, outputTokens: 4000 });
+    expect(saved.tasks[tree.id].error).toContain('Shared token budget exhausted');
+    expect(saved.tasks[tree.id].reservation).toBeUndefined();
+    await first.close(); hosts.splice(hosts.indexOf(first), 1);
+    const second = await open(model(turn), first.options.dataDir);
+    await second.reconcile();
+    expect((await second.store.get(tree.id))!.chargedTokens).toBe(4100);
+    expect(turn).toHaveBeenCalledOnce();
+});
+
 it('does not replay an ambiguous provider request after reopen', async () => {
     const turn = vi.fn(async () => { throw new Error('transport lost'); });
     const first = await open(model(turn)), tree = await first.create('parent');
@@ -209,7 +229,7 @@ it('an inbox message arriving during a model call prevents a later sleep from st
             await barrier;
             return reply('', [tool('schedule_self', { delaySeconds: 3600, reason: 'wait' })]);
         }
-        expect(JSON.stringify(request.messages)).toContain('urgent correction');
+        expect(request.messages.find(m => m.content === 'urgent correction')?.provenance).toBe('human');
         return reply('corrected');
     }));
     const tree = await h.create('initial');
@@ -423,21 +443,21 @@ it('recovers referenced evidence from durable history without rerunning the sour
     const read = vi.fn(async () => ({ ok: true, content: evidence }));
     const path = await mkdtemp(join(tmpdir(), 'standalone-test-')); paths.push(path);
     let calls = 0;
-    const h = await StandaloneHarness.open({ dataDir: path, contextTokens: 7000,
+    const h = await StandaloneHarness.open({ dataDir: path, contextTokens: 7000, checkpointing: false,
         tools: [{ definition: { name: 'evidence', description: 'Read evidence', parameters: { type: 'object', properties: {} } }, effect: 'read', validate: () => ({}), execute: read }],
         provider: model(async request => {
             switch (calls++) {
                 case 0: return reply('', [tool('evidence', {})]);
                 case 1:
-                    expect(request.messages.find(message => message.role === 'tool_result')?.content).toContain('read_tool_result({"messageIndex":2,"offset":0})');
+                    expect(request.messages.find(message => message.role === 'tool_result')?.content).toContain('read_tool_result({"callId":"evidence","offset":0})');
                     return reply('', [tool('save_progress', { notes: 'Verify the exact end of the earlier evidence.' })]);
                 case 2:
-                    expect(request.messages.find(message => message.role === 'tool_result')?.content).toContain('read_tool_result({"messageIndex":2,"offset":0})');
+                    expect(request.messages.find(message => message.role === 'tool_result')?.content).toContain('read_tool_result({"callId":"evidence","offset":0})');
                     // Grow protected state; the saved source must remain retrievable after it is no longer recent.
                     return reply('', [tool('save_progress', { notes: 'Now recover the saved tail. ' + 'n'.repeat(7000) }, 'progress-again')]);
                 case 3:
-                    expect(request.messages.find(message => message.role === 'tool_result')?.content).toContain('read_tool_result({"messageIndex":2,"offset":0})');
-                    return reply('', [tool('read_tool_result', { messageIndex: 2, offset: 8000 })]);
+                    expect(request.messages.find(message => message.role === 'tool_result')?.content).toContain('read_tool_result({"callId":"evidence","offset":0})');
+                    return reply('', [tool('read_tool_result', { callId: 'evidence', offset: 8000 })]);
                 default: {
                     const retrieved = request.messages.filter(message => message.role === 'tool_result' && message.toolName === 'read_tool_result').at(-1)!;
                     expect(JSON.parse(retrieved.content)).toMatchObject({ content: evidence.slice(8000), eof: true, nextOffset: evidence.length });
@@ -466,6 +486,12 @@ it('recovers referenced evidence from durable history without rerunning the sour
     expect(() => internalAction(saved, task, 'read_tool_result', { messageIndex: 2, offset: evidence.length + 1 }, 'offset')).toThrow('Offset exceeds');
     const other = await reopened.store.create('Other task', [], reopened.compositionId);
     expect(() => internalAction(other, other.tasks[other.id], 'read_tool_result', { messageIndex: 2, offset: 0 }, 'isolated')).toThrow('does not exist');
+    task.checkpoint = { through: task.messages.length, text: 'Evidence saved.' };
+    expect(JSON.parse(internalAction(saved, task, 'read_tool_result', { callId: 'evidence', offset: 0 }, 'stable')).content).toBe(first.content);
+    expect(() => internalAction(other, other.tasks[other.id], 'read_tool_result', { callId: 'evidence', offset: 0 }, 'isolated-call')).toThrow('missing or ambiguous');
+    expect(() => validateInternal('read_tool_result', { messageIndex: 2, callId: 'evidence' })).toThrow('exactly one');
+    task.messages.push(structuredClone(task.messages[2]));
+    expect(() => internalAction(saved, task, 'read_tool_result', { callId: 'evidence', offset: 0 }, 'duplicate')).toThrow('ambiguous');
     expect(read).toHaveBeenCalledOnce();
 });
 
@@ -628,4 +654,107 @@ it('retrieves spilled coding output after reopen without projecting the retrieva
     await second.send(tree.id, tree.id, 'retrieve');
     await state(second, tree.id, current => expect(current.tasks[tree.id].answer).toBe('retrieved exact output'));
     expect(await readFile(join(workspace, 'runs'), 'utf8')).toBe('1');
+});
+
+it.each([false, true])('journals automatic checkpoints atomically (partial=%s)', async partial => {
+    const { internalDefinitions } = await import('../src/standalone/tools.js');
+    let maintenanceCalls = 0;
+    const h = await open(model(async request => {
+        if (request.system?.startsWith('Maintain a concise working checkpoint')) {
+            maintenanceCalls++;
+            expect(request.tools).toEqual([]);
+            expect(request.messages[0].content).toContain('recorded detail');
+            return { ...reply('Completed inspections are recorded. Continue remaining work.'), stopReason: partial ? 'max_tokens' : 'end_turn' };
+        }
+        expect(request.messages.some(m => m.content.startsWith('Working checkpoint'))).toBe(true);
+        return reply('done');
+    }), undefined, { contextTokens: 2000, outputTokens: 64 });
+    const tree = await h.store.create('audit', internalDefinitions.map(t => t.name), h.compositionId);
+    await h.store.change(tree.id, 'fixture.history', current => {
+        const task = current.tasks[tree.id];
+        task.messages.push(...Array.from({ length: 20 }, (_, index) => ({ role: 'assistant' as const, content: `recorded detail ${index}: ${'evidence '.repeat(28)}` })), { role: 'user', provenance: 'human', content: 'Finish the remaining audit.' });
+        task.notes = 'Existing notes';
+    });
+    const original = structuredClone((await h.store.get(tree.id))!.tasks[tree.id].messages);
+    await h.reconcile();
+    await state(h, tree.id, current => expect(current.tasks[tree.id].phase).toBe(partial ? 'failed' : 'completed'));
+    const saved = (await h.store.get(tree.id))!;
+    expect(maintenanceCalls).toBeGreaterThan(0);
+    expect(saved.tasks[tree.id].messages.slice(0, original.length)).toEqual(original);
+    expect(saved.usage.inputTokens).toBeGreaterThan(0);
+    if (partial) {
+        expect(saved.tasks[tree.id].checkpoint).toBeUndefined();
+        expect(saved.tasks[tree.id].notes).toBe('Existing notes');
+    } else {
+        const checkpoint = saved.tasks[tree.id].checkpoint;
+        expect(checkpoint?.through).toBeGreaterThan(0);
+        const events = await h.store.events(tree.id, 0);
+        expect(events.some(e => e.type === 'model.intent' && (e.data as { purpose?: string }).purpose === 'checkpoint')).toBe(true);
+        await h.close(); hosts.splice(hosts.indexOf(h), 1);
+        const reopened = await open(h.options.provider, h.options.dataDir, { contextTokens: 2000, outputTokens: 64 });
+        expect((await reopened.store.get(tree.id))!.tasks[tree.id].checkpoint).toEqual(checkpoint);
+    }
+});
+
+it('preserves rich tool results in the next request and after reopening', async () => {
+    const blocks = [{ type: 'text' as const, text: 'Visible detail' }, { type: 'image' as const, data: 'aGVsbG8=', mimeType: 'image/png' }];
+    let calls = 0;
+    const provider = model(async request => {
+        if (calls++ === 0) return reply('', [tool('image_evidence', {})]);
+        expect(request.messages.find(m => m.role === 'tool_result' && m.toolName === 'image_evidence')).toMatchObject({ contentBlocks: blocks });
+        return reply('Image received');
+    });
+    const h = await open(provider, undefined, { tools: [{ definition: { name: 'image_evidence', description: 'Read image evidence', parameters: { type: 'object', properties: {} } }, effect: 'read', validate: args => args,
+        execute: async () => ({ ok: true, content: 'Image attached', contentBlocks: blocks }) }] });
+    const tree = await h.create('Read the image');
+    await state(h, tree.id, current => expect(current.tasks[tree.id].answer).toBe('Image received'));
+    const expected = structuredClone(blocks);
+    blocks[0].text = 'Changed external buffer';
+    await h.close(); hosts.splice(hosts.indexOf(h), 1);
+    const reopened = await open(provider, h.options.dataDir, h.options);
+    const saved = (await reopened.store.get(tree.id))!.tasks[tree.id];
+    expect(saved.messages.find(m => m.role === 'tool_result' && m.toolName === 'image_evidence')).toMatchObject({ contentBlocks: expected });
+});
+
+it.each([false, true])('continues a persisted partial source checkpoint atomically (incomplete response=%s)', async incomplete => {
+    const giant = 'saved evidence '.repeat(8000);
+    let chunks = 0;
+    const provider = model(async request => {
+        if (request.system?.startsWith('Maintain a concise working checkpoint')) {
+            const evidence = JSON.parse(request.messages[0].content);
+            if (evidence.sourceChunk) {
+                chunks++;
+                expect(evidence.sourceChunk.offset).toBeGreaterThanOrEqual(20);
+                expect(evidence.sourceChunk.endOffset).toBeGreaterThan(evidence.sourceChunk.offset);
+            }
+            return { ...reply('Covered evidence is retained.'), stopReason: incomplete ? 'max_tokens' : 'end_turn' };
+        }
+        return reply('done');
+    });
+    const first = await open(provider, undefined, { contextTokens: 4000, outputTokens: 64 });
+    const tree = await first.store.create('Task', ['read_tool_result'], first.compositionId);
+    await first.store.change(tree.id, 'fixture.partial', current => {
+        const task = current.tasks[tree.id];
+        task.messages.push({ role: 'assistant', content: '', toolCalls: [tool('read', {}, 'large')] }, { role: 'tool_result', toolName: 'read', toolCallId: 'large', content: giant });
+        task.checkpoint = { through: 1, text: 'First source fragment covered.', partial: { end: 3, offset: 20 } };
+        task.notes = 'Preserve these notes';
+        task.phase = 'completed';
+    });
+    const before = (await first.store.get(tree.id))!.tasks[tree.id];
+    await first.close(); hosts.splice(hosts.indexOf(first), 1);
+    const reopened = await open(provider, first.options.dataDir, first.options);
+    await reopened.send(tree.id, tree.id, 'Finish using saved evidence');
+    await state(reopened, tree.id, current => expect(current.tasks[tree.id].phase).toBe(incomplete ? 'failed' : 'completed'));
+    const after = (await reopened.store.get(tree.id))!.tasks[tree.id];
+    expect(after.messages.slice(0, before.messages.length)).toEqual(before.messages);
+    expect(chunks).toBeGreaterThan(0);
+    if (incomplete) {
+        expect(after.checkpoint).toEqual(before.checkpoint);
+        expect(after.notes).toBe(before.notes);
+    } else {
+        expect(after.checkpoint!.through).toBeGreaterThanOrEqual(3);
+        expect(after.checkpoint!.partial).toBeUndefined();
+    }
+    const intents = (await reopened.store.events(tree.id, 0)).filter(e => e.type === 'model.intent');
+    expect(JSON.stringify(intents)).toContain('endOffset');
 });

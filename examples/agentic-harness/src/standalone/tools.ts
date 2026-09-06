@@ -34,7 +34,7 @@ export const internalDefinitions: ToolDefinition[] = [
     definition('schedule_self', 'Save progress and release the worker until a future time. On wake, continue this same task. Bounded by the task expiry and shared budget.', { delaySeconds: { type: 'integer' }, reason: text }),
     definition('save_progress', 'Replace your durable working notes: decisions, constraints, evidence references and remaining work. Always retained in prepared context.', { notes: text }),
     definition('save_artifact', 'Save a named text artifact for this task tree. Use artifacts for longer findings and retrieve them when needed.', { name: text, content: text }),
-    definition('read_tool_result', 'Retrieve exact saved text from this task’s tool history. Returns up to 8000 UTF-16 code units; continue with nextOffset. Use messageIndex from a context reference. Does not rerun the original tool.', { messageIndex: { type: 'integer' }, offset: { type: 'integer' } }, ['messageIndex']),
+    definition('read_tool_result', 'Retrieve exact saved text from this task’s tool history. Returns up to 8000 UTF-16 code units; continue with nextOffset. Use callId or messageIndex from a context reference. Does not rerun the original tool.', { messageIndex: { type: 'integer' }, callId: text, offset: { type: 'integer' } }, []),
     definition('read_artifact', 'Read up to 12000 UTF-16 code units from a text artifact in this task tree. Offset and returned nextOffset are UTF-16 code units; use nextOffset to paginate until eof is true.', { name: text, offset: { type: 'integer' } }, ['name']),
 ];
 export function validateInternal(name: string, args: Record<string, unknown>): Record<string, unknown> {
@@ -46,7 +46,10 @@ export function validateInternal(name: string, args: Record<string, unknown>): R
         case 'schedule_self': return { delaySeconds: integer(args.delaySeconds, 1, 604800), reason: string(args.reason, 2000) };
         case 'save_progress': return { notes: string(args.notes, 8000) };
         case 'save_artifact': return { name: string(args.name, 100), content: string(args.content, 100000) };
-        case 'read_tool_result': return { messageIndex: integer(args.messageIndex, 0, Number.MAX_SAFE_INTEGER), offset: args.offset === undefined ? 0 : integer(args.offset, 0, Number.MAX_SAFE_INTEGER) };
+        case 'read_tool_result': {
+            if ((args.messageIndex === undefined) === (args.callId === undefined)) throw new Error('Provide exactly one of messageIndex or callId');
+            return { ...(args.callId === undefined ? { messageIndex: integer(args.messageIndex, 0, Number.MAX_SAFE_INTEGER) } : { callId: string(args.callId, 1000) }), offset: args.offset === undefined ? 0 : integer(args.offset, 0, Number.MAX_SAFE_INTEGER) };
+        }
         case 'read_artifact': return { name: string(args.name, 100), offset: args.offset === undefined ? 0 : integer(args.offset, 0, 100000) };
         default: throw new Error('Unknown tool');
     }
@@ -101,13 +104,11 @@ export function internalAction(tree: Tree, task: Task, name: string, args: Recor
             if (terminal(target.phase))
                 throw new Error('Recipient is terminal');
             // Inbox is a separate field so it cannot split an assistant/tool-result group.
-            const inbox = (target as Task & {
-                inbox?: string[];
-            });
+            const inbox = target;
             inbox.inbox ??= [];
             if (inbox.inbox.length >= 16)
                 throw new Error('Recipient inbox is full');
-            inbox.inbox.push(`Message from task ${task.id} (untrusted task content): ${args.message}`);
+            inbox.inbox.push({ role: 'user', provenance: 'model', content: `Message from task ${task.id} (untrusted task content): ${args.message}` });
             return 'Message queued';
         }
         case 'cancel_agent':
@@ -136,7 +137,9 @@ export function internalAction(tree: Tree, task: Task, name: string, args: Recor
             return `Saved ${name}`;
         }
         case 'read_tool_result': {
-            const messageIndex = args.messageIndex as number, offset = args.offset as number;
+            const matches = args.callId === undefined ? [args.messageIndex as number] : task.messages.flatMap((message, index) => message.role === 'tool_result' && message.toolCallId === args.callId ? [index] : []);
+            if (matches.length !== 1) throw new Error('Saved tool call is missing or ambiguous in this task');
+            const messageIndex = matches[0], offset = args.offset as number;
             const source = task.messages[messageIndex];
             if (!source || source.role !== 'tool_result') throw new Error('Saved tool result does not exist in this task');
             if (offset > source.content.length) throw new Error('Offset exceeds saved result');

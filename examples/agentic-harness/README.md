@@ -124,7 +124,9 @@ resolution UI. Cancellation is best effort and cannot undo an external effect.
 Default tree limits: 60 model calls, 200,000 tokens for admission, eight children,
 two delegation levels, and 24-hour expiry. Each task also has an individual call
 limit. Model calls reserve estimated input plus maximum output atomically across
-children, then reconcile reported usage. Token estimation is not a billing cap:
+children, then reconcile reported usage. The bundled subscription OAuth transport
+removes the requested output cap, so its output reservation is a planning allowance.
+Token estimation is not a billing cap:
 a provider can report higher usage, which blocks subsequent admission. Unknown
 requests keep their reservation. Context preparation plus a provider call defaults to a five-minute absolute deadline.
 Set `modelTimeoutMs` in `HarnessOptions`, or CLI `--model-timeout-ms 300000`.
@@ -321,3 +323,46 @@ a batch by this option.
 The host supplies Agentic's provider-neutral `cacheScope` from the composition and task identity before request preparation and journaling. It survives scheduled continuation and reopen, while children receive distinct scopes. Providers may ignore the hint; the subscription adapter maps it to its own cache-routing fields. This is not a conversation store, cache guarantee or isolation boundary. Current machine state still replaces the final state message on each call.
 
 The `runtime.gears` extension is now version `8`. Existing trees retain their composition fingerprint and require their original runtime composition to resume. Start a new tree for this composition; no stored history is rewritten.
+
+
+## Experimental working checkpoints
+
+The host can summarize an outgoing history prefix before context selection drops
+it. The checkpoint is ordinary text plus a source cursor, while `Task.messages`
+retains the complete source history. Each checkpoint call uses the normal model
+intent/receipt journal and consumes the same task and shared call/token budgets.
+Intent events identify `purpose: checkpoint` and the source range; subsequent
+prepared requests show the exact checkpoint the task model received.
+
+Only a complete, nonempty, bounded text response commits the checkpoint. A partial
+or failed response preserves the prior checkpoint, notes and source history and
+stops the task with a diagnostic. Successful checkpoints reconcile and replace
+progress notes. Oversized source groups are processed in bounded chunks with a persisted partial
+cursor. Each intent records exact character coverage. The complete history boundary
+advances only when the group is fully processed; no source is silently truncated.
+
+`HarnessOptions.checkpointing` defaults to `true`; set it to `false` for an explicit
+composition without automatic maintenance. The setting participates in composition
+identity. Tool evidence can be retrieved by `callId`, independent of active-context
+positions; the older `messageIndex` form still addresses the full archive. Ambiguous
+call IDs are rejected. This policy remains under evaluation for retention quality
+and maintenance overhead.
+
+
+Recoverable tool results have 1,000-character previews by default to leave room
+for checkpoints and recent instructions. The full original remains in the task
+archive and `read_tool_result` pages it without rerunning the tool. Maintenance
+fits complete prefixes locally and uses resumable chunks for oversized groups.
+These context and runtime changes bump composition identity; open existing task
+stores with their original composition rather than silently reinterpreting them.
+
+
+Prepared requests are owned by Agentic execution; inspection cannot change their
+accounting or dispatch content. Checkpoint source messages must survive custom
+context preparation unchanged. Rich tool results use the shared Agentic projection
+and retain content blocks in the working transcript as well as the receipt.
+
+Gears owns lease checks, shared-budget admission, queue scheduling and atomic
+state/receipt commits. Agentic owns source views, checkpoint fitting and cursors,
+lossless source preparation, model dispatch and tool-message conversion. The host
+supplies transient state to `checkpointView` instead of manually adjusting indexes.
