@@ -470,3 +470,25 @@ failure, overflow, missing IDs and symlink rejection. Validation: 509 Agentic an
 This is bounded capture with persistence after completion, not crash-safe log
 streaming. Hosts own storage retention; output already beyond the capture limit
 cannot be recovered. The default Gears CLI remains read-only.
+
+
+### Fixed coding campaign after output fixes
+
+Three predeclared Terra trials held the current architecture, tool grants, prompt,
+source revision and 16k context/200k shared task budget constant. Two completed
+coding and child review. All three generated patches passed independent build,
+57 tests and the pagination oracle, but the third did not complete its workflow.
+Calls/input tokens were 22/166,592, 19/141,670 and 22/186,392. All 63 model intents
+had matching receipts; peak context was 15,860, with no context-window overflow.
+
+The third trial repaired a failing generated test, then exhausted the shared
+budget around delegation: the child could not reserve a second request and the
+parent could not reserve its final request. No saved-output retrieval was invoked
+in any trial. These runs measure ordinary coding completion; deterministic tests
+remain the evidence for output recovery. Cache-read counts and complete journals
+are preserved separately outside the repository.
+
+This 2/3 sample does not establish a stable success rate or efficiency improvement.
+It identifies cumulative repair/delegation cost as a remaining obstacle. No tool,
+architecture, prompt or budget changes were made between trials; no generated
+patch was adopted and no existing instance/data was modified.
