@@ -366,6 +366,10 @@ export class StandaloneHarness {
         const reservation = contextReport.usage.totalTokens;
         await this.execution.dispatchModel(prepared, {
             signal, deadline, requireComplete: true, operationId,
+            onRequest: async request => {
+                await this.assertLease();
+                await this.store.change(tree.id, 'model.request', () => {}, task.id, { operationId, request });
+            },
             onIntent: async (intent) => {
                 await this.assertLease();
                 await this.store.change(tree.id, 'model.intent', current => {

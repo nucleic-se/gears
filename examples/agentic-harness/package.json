@@ -11,13 +11,14 @@
     "dogfood": "npm run build && node dist/standalone/dogfood.js"
   },
   "dependencies": {
-    "@nucleic-se/gears": "file:../..",
+    "@earendil-works/pi-ai": "0.85.1",
     "@nucleic-se/agentic": "file:../../../agentic",
+    "@nucleic-se/gears": "file:../..",
     "kysely": "^0.28.17"
   },
   "devDependencies": {
+    "@types/node": "^25.0.9",
     "typescript": "^5.9.3",
-    "vitest": "^4.0.17",
-    "@types/node": "^25.0.9"
+    "vitest": "^4.0.17"
   }
 }

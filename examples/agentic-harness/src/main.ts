@@ -2,7 +2,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
-import { CodexSubscriptionProvider } from '@nucleic-se/agentic/providers';
+import { SubscriptionProvider } from '@nucleic-se/agentic/providers/subscription';
 import type { ILLMProvider } from '@nucleic-se/agentic/llm';
 import { openQueuedAgent } from './runtime.js';
 
@@ -11,7 +11,7 @@ if (dataIndex >= 0 && !args[dataIndex + 1]) throw new Error('--data needs a dire
 const temporary = dataIndex < 0;
 const directory = temporary ? await mkdtemp(join(tmpdir(), 'gears-agentic-demo-')) : resolve(args[dataIndex + 1]);
 const live = args.includes('--live');
-const provider: ILLMProvider = live ? new CodexSubscriptionProvider({ model: 'gpt-6-astra', reasoningEffort: 'low' }) : {
+const provider: ILLMProvider = live ? new SubscriptionProvider({ model: 'gpt-6-astra', reasoningEffort: 'low' }) : {
     async turn() { return { message: { role: 'assistant', content: 'GEARS_OK' }, stopReason: 'end_turn', usage: { inputTokens: 1, outputTokens: 1 } }; },
     async structured() { throw new Error('This example uses text turns'); },
 };

@@ -21,9 +21,9 @@ complexity costs more than their benefit. Breaking changes are allowed during
 alpha, with documented persistence consequences and no silent data loss.
 
 Measure progress through shared Agentic conformance tests, Gears recovery tests
-and real dogfooding. Use Pi and Hermes as benchmarks across all harness machinery,
-ground comparisons in source evidence, and keep detailed competitor research
-outside the repositories. Record failed workloads alongside successful ones.
+and real dogfooding. Ground assessments in source evidence and repeatable
+measurements across all harness machinery. Record failed workloads alongside
+successful ones.
 
 See [README](README.md) for the current composition and
 [validation](VALIDATION.md) for recorded evidence.

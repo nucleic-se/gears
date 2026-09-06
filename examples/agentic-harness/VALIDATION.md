@@ -1,7 +1,7 @@
 # Standalone harness acceptance — 2026-09-06
 
 Validated on macOS with Node 26.7.0. No Assembly or deployed agent configuration
-was changed. Pi remains Assembly's default runtime.
+was changed.
 
 ## Automated checks
 
