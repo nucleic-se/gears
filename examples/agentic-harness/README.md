@@ -251,3 +251,27 @@ observed state on failure and are written to a unique file under `.data/dogfood/
 Model admission failures identify shared call limits, per-task call limits, token
 reservation shortages or expiry; token errors include required and remaining
 amounts. Rejected admission still does not dispatch a provider request.
+
+### Repeatable scenario set
+
+Run from this example directory after building:
+
+```sh
+node dist/standalone/dogfood.js .
+AGENTIC_DOGFOOD_SCENARIO=reconciliation-with-restart node dist/standalone/dogfood.js
+```
+
+Both runs use fresh isolated storage, two children, saved progress, scheduled
+continuation and a forced checkpoint restart. The first reviews actual harness
+source; it checks lifecycle completion, not the correctness of model findings.
+The second generates two fixed CSV ledgers in its temporary workspace and checks
+an exact combined total excluding void rows in both the artifact and final answer. Its expected result is computed by
+the controller and never inserted into the model prompt. This checks an objective
+result as well as lifecycle completion; it is not a broad reasoning benchmark.
+Reports retain scenario identity, expected result when applicable, task state and
+usage. Preserve every run, including failures, when repeating the set.
+
+Combine these with Agentic's `eval:retention` and `eval:retention:live` for controlled
+evidence recovery, and the harness tests for deadline/unknown-outcome behavior.
+Exact model requests and deadline metadata remain available in the task journal
+through inspection. No one scenario substitutes for the other checks.

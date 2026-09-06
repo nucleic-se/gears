@@ -258,3 +258,40 @@ after reopening, expiry during model/tool execution, queue headroom, recorded
 deadline metadata and refusal to reopen active tasks under a different timeout
 policy. This verifies local lifecycle contracts, not upstream cancellation or
 progress. No live reliability conclusion follows from these deterministic tests.
+
+### Varied live checks under the new deadline policy
+
+All runs below used Terra, fresh temporary data and the existing subscription.
+Reports and complete Gears journals were retained outside source control.
+
+- Source review: failed acceptance after 195 seconds, 30 model calls, 183,015
+  input / 7,297 output tokens. Both children completed and checkpoint restart
+  succeeded. One completed provider call took 97,176 ms, beyond the old deadline.
+  The parent then exhausted shared token admission while re-reading source and
+  retrieving history (five recovery calls). The rejected request required 15,579
+  tokens with 9,688 remaining. All 30 dispatched calls have completed receipts;
+  the budget rejection occurred before the next dispatch. The token limit was
+  not raised to obtain a pass.
+- Ledger reconciliation: passed after 69 seconds and 15 calls, using 18,912 input /
+  1,277 output tokens. Both children completed, checkpoint restart succeeded,
+  and artifact plus final answer matched `A=5021 B=5249 TOTAL=10270`. These fixed
+  ledgers contain posted and void rows; expected values are never in the prompt.
+- Agentic retention: all six deterministic cases passed. The paired live check
+  passed both modes. Full evidence used two model calls, zero successful retrievals
+  and 5,530 input / 181 output tokens; recoverable evidence used two calls, one
+  retrieval and 2,363 input / 50 output tokens. This fixed-order trial is not a
+  general cost comparison.
+
+Every source-review and ledger model intent had an exact prepared request,
+context report and deadline metadata in the archived journal (45 total), with
+one corresponding receipt each. The existing inspection regression compares
+recorded requests to those observed at the provider boundary and after reopening.
+The 50-test harness suite also covers expiry, cancellation, ambiguous outcomes,
+no implicit replay and recovery after reopening.
+
+The scenario set is repeatable via the README commands, but these individual
+live trials do not establish a success rate. The deadline change helps one
+observed slow call; it does not solve long-task budget management. Next priorities
+are reducing repeated evidence reads and preserving budget for synthesis, tested
+against these same scenarios. Model-progress observation and explicit recovery
+policy still need separate design; no idle timer or automatic retries were added.
