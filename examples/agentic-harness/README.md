@@ -315,3 +315,9 @@ in coding compositions and keep their output directory with the task data.
 The default read-only CLI remains unchanged. Older persisted tasks require their
 original context composition. Child-completion messages are not yet budgeted as
 a batch by this option.
+
+### Stable model cache scope
+
+The host supplies Agentic's provider-neutral `cacheScope` from the composition and task identity before request preparation and journaling. It survives scheduled continuation and reopen, while children receive distinct scopes. Providers may ignore the hint; the subscription adapter maps it to its own cache-routing fields. This is not a conversation store, cache guarantee or isolation boundary. Current machine state still replaces the final state message on each call.
+
+The `runtime.gears` extension is now version `8`. Existing trees retain their composition fingerprint and require their original runtime composition to resume. Start a new tree for this composition; no stored history is rewritten.

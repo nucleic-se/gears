@@ -45,6 +45,12 @@ it('delegates two children, collects results, sleeps without a worker and resume
     expect(Object.keys(result.tasks)).toHaveLength(3);
     expect(result.modelCalls).toBe(6);
     expect(result.usage).toEqual({ inputTokens: 600, outputTokens: 120 });
+    const intents = (await second.store.events(tree.id, 0)).filter(event => event.type === 'model.intent');
+    expect(intents).toHaveLength(6);
+    for (const event of intents) {
+        const request = (event.data as { intent: { request: TurnRequest } }).intent.request;
+        expect(request.cacheScope).toBe(`${second.compositionId}:${event.taskId}`);
+    }
 });
 it('shares a hard model-call admission budget across children', async () => {
     const turn = vi.fn(async () => reply('', [tool('spawn_agent', { objective: 'child', tools: [], maxCalls: 2 })]));
