@@ -1,0 +1,21 @@
+{
+  "name": "@nucleic-se/gears-agentic-example",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "tsc -p tsconfig.tests.json && vitest run",
+    "demo": "node dist/main.js"
+  },
+  "dependencies": {
+    "@nucleic-se/gears": "file:../..",
+    "@nucleic-se/agentic": "file:../../../agentic",
+    "kysely": "^0.28.17"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.17",
+    "@types/node": "^25.0.9"
+  }
+}

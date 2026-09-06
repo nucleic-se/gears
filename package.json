@@ -49,7 +49,8 @@
     "clean": "rm -f test-*.sqlite* && rm -f .gears/test-*.sqlite*",
     "typecheck:tests": "tsc -p tsconfig.tests.json",
     "test:package": "npm run build && node dist/scripts/package-smoke.js",
-    "test:package:built": "node dist/scripts/package-smoke.js"
+    "test:package:built": "node dist/scripts/package-smoke.js",
+    "test:agentic-example": "npm run build && npm --prefix examples/agentic-harness run build && npm --prefix examples/agentic-harness test"
   },
   "engines": {
     "node": ">=22.14.0"

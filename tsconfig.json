@@ -15,5 +15,8 @@
         "src/**/*",
         "examples/**/*",
         "scripts/**/*.ts"
+    ],
+    "exclude": [
+        "examples/agentic-harness"
     ]
 }

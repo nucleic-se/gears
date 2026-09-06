@@ -16,6 +16,9 @@ framework is alpha.
 
 ## Quickstart
 
+For an independent agent built on the queue and scheduler, see the
+[Agentic harness example](examples/agentic-harness/README.md).
+
 ```bash
 npm install
 npm run build
