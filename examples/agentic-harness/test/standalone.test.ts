@@ -451,3 +451,22 @@ it('refuses a timeout-policy change for a persisted active composition', async (
     const second = await open(provider, first.options.dataDir, { modelTimeoutMs: 1000 });
     expect((await second.store.get(tree.id))!.tasks[tree.id].phase).toBe('sleeping');
 });
+
+
+it('honors requested byte limits and continues across UTF-8 boundaries', async () => {
+    const { workspaceTools } = await import('../src/standalone/tools.js');
+    const { writeFile } = await import('node:fs/promises');
+    const path = await mkdtemp(join(tmpdir(), 'standalone-test-')); paths.push(path);
+    await writeFile(join(path, 'text'), 'abc😀tail');
+    const read = (await workspaceTools(path)).find(tool => tool.definition.name === 'read_file')!;
+    const signal = new AbortController().signal;
+    const first = JSON.parse((await read.execute(read.validate({ path: 'text', limit: 5 }), signal)).content);
+    expect(first).toMatchObject({ content: 'abc', bytesRead: 3, nextOffset: 3, eof: false });
+    const second = JSON.parse((await read.execute(read.validate({ path: 'text', offset: first.nextOffset, limit: 4 }), signal)).content);
+    expect(second).toMatchObject({ content: '😀', bytesRead: 4, nextOffset: 7, eof: false });
+    const last = JSON.parse((await read.execute(read.validate({ path: 'text', offset: second.nextOffset, limit: 4 }), signal)).content);
+    expect(last).toMatchObject({ content: 'tail', bytesRead: 4, nextOffset: 11, eof: true });
+    await expect(read.execute(read.validate({ path: 'text', offset: 3, limit: 1 }), signal)).rejects.toThrow('increase limit');
+    for (const limit of [0, -1, 1.5, 16001]) expect(() => read.validate({ path: 'text', limit })).toThrow();
+    expect(read.validate({ path: 'text' }).limit).toBe(16000);
+});

@@ -186,8 +186,8 @@ export async function workspaceTools(directory: string): Promise<HarnessTool[]> 
                 }
                 return { ok: true, content: JSON.stringify({ entries, truncated }) };
             } },
-        { effect: 'read', definition: definition('read_file', 'Read a bounded UTF-8 slice. Offset is bytes; use returned nextOffset to continue. Rejects invalid UTF-8.', { path: text, offset: { type: 'integer' } }, ['path']),
-            validate: args => ({ path: string(args.path, 1000), offset: args.offset === undefined ? 0 : integer(args.offset, 0, 100000000) }),
+        { effect: 'read', definition: definition('read_file', 'Read a bounded UTF-8 slice. Offset and limit are bytes; limit defaults to 16000 (maximum). Request smaller slices for focused verification. Use returned nextOffset to continue. Rejects invalid UTF-8.', { path: text, offset: { type: 'integer' }, limit: { type: 'integer', minimum: 1, maximum: 16000 } }, ['path']),
+            validate: args => ({ path: string(args.path, 1000), offset: args.offset === undefined ? 0 : integer(args.offset, 0, 100000000), limit: args.limit === undefined ? 16000 : integer(args.limit, 1, 16000) }),
             async execute(args, signal) {
                 signal.throwIfAborted();
                 const file = await open(await confined(args.path as string), constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOFOLLOW);
@@ -196,7 +196,7 @@ export async function workspaceTools(directory: string): Promise<HarnessTool[]> 
                     if (!stat.isFile())
                         throw new Error('Not a regular file');
                     signal.throwIfAborted();
-                    const buffer = Buffer.alloc(16000), read = await file.read(buffer, 0, buffer.length, args.offset as number);
+                    const buffer = Buffer.alloc(args.limit === undefined ? 16000 : integer(args.limit, 1, 16000)), read = await file.read(buffer, 0, buffer.length, args.offset as number);
                     signal.throwIfAborted();
                     const decoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
                     let content: string;
@@ -208,7 +208,7 @@ export async function workspaceTools(directory: string): Promise<HarnessTool[]> 
                         throw new Error('File is not UTF-8 or offset splits a character');
                     }
                     const consumed = Buffer.byteLength(content, 'utf8');
-                    if (read.bytesRead > 0 && consumed === 0) throw new Error('File is not UTF-8 or offset splits a character');
+                    if (read.bytesRead > 0 && consumed === 0) throw new Error('Read limit cannot fit the next UTF-8 character; increase limit');
                     const nextOffset = (args.offset as number) + consumed;
                     return { ok: true, content: JSON.stringify({ bytes: stat.size, offset: args.offset, bytesRead: consumed, nextOffset, eof: nextOffset >= stat.size, content }) };
                 }

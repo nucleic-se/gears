@@ -275,3 +275,12 @@ Combine these with Agentic's `eval:retention` and `eval:retention:live` for cont
 evidence recovery, and the harness tests for deadline/unknown-outcome behavior.
 Exact model requests and deadline metadata remain available in the task journal
 through inspection. No one scenario substitutes for the other checks.
+
+### Focused source reads
+
+`read_file` accepts an optional byte `limit` from 1 to 16,000 (default 16,000).
+The returned `bytesRead` can be smaller to preserve a UTF-8 character boundary;
+continue using `nextOffset`. A limit too small to fit the next character returns
+an error asking for a larger limit. This lets the model request focused evidence
+without a full default chunk. The tool definition changes the CLI composition
+fingerprint, so existing active tasks require their matching configuration.

@@ -295,3 +295,23 @@ observed slow call; it does not solve long-task budget management. Next prioriti
 are reducing repeated evidence reads and preserving budget for synthesis, tested
 against these same scenarios. Model-progress observation and explicit recovery
 policy still need separate design; no idle timer or automatic retries were added.
+
+### Focused source-read limit
+
+The failed source-review trace supplied `limit` on file reads, including a
+10,000-byte request, but the old tool ignored that field and read up to 16,000
+bytes. `read_file` now declares and validates an optional 1–16,000 byte limit.
+Build and 51 harness tests passed. The new test verifies exact byte counts,
+multibyte boundary continuation, too-small limits and invalid limits. This fixes
+request granularity; it does not establish better semantic evidence selection or
+lower end-to-end token use.
+
+The subsequent full Terra source-review scenario passed in 165 seconds, with
+26 calls and 142,035 input / 8,336 output tokens. Both children completed,
+checkpoint restart succeeded, and the final review artifact was saved. The
+model requested smaller slices (including 7,000, 8,000, 10,000 and 12,000 bytes)
+and made three history retrieval calls. All 26 intents and completed receipts
+are retained with exact context/deadline metadata outside source control.
+The prior failed run used 30 calls and 183,015 input tokens. These are individual
+stochastic runs over evolving source, not a controlled estimate of savings from
+the new limit. No token or call limits were raised.
