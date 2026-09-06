@@ -295,3 +295,9 @@ continue using `nextOffset`. A limit too small to fit the next character returns
 an error asking for a larger limit. This lets the model request focused evidence
 without a full default chunk. The tool definition changes the CLI composition
 fingerprint, so existing active tasks require their matching configuration.
+
+Artifact reads return `totalCharacters`, `offset`, `content`, `nextOffset` and `eof`.
+Continue with `nextOffset` until `eof`; offsets count UTF-16 code units and each
+page contains at most 12,000 units. An offset exactly at the end returns an empty
+EOF page; an offset beyond the end is rejected. Runtime version 7 requires the
+original composition for older persisted tasks, as described above.

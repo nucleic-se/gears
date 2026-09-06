@@ -355,6 +355,30 @@ it('counts inherited artifact names as new entries and preserves own entries aft
     } finally { await web.close(); }
 });
 
+it('paginates artifacts with exact UTF-16 offsets and rejects offsets beyond their end', async () => {
+    const { internalAction, validateInternal } = await import('../src/standalone/tools.js');
+    const h = await open(model(async () => reply('done'))), tree = await h.create('artifact pagination');
+    await state(h, tree.id, current => expect(current.tasks[current.id].phase).toBe('completed'));
+    const content = 'a'.repeat(11999) + '😀' + 'tail';
+    await h.store.change(tree.id, 'fixture.artifact-pages', current => {
+        current.artifacts.paged = content;
+        current.artifacts.empty = '';
+    });
+    const saved = (await h.store.get(tree.id))!, task = saved.tasks[tree.id];
+    const first = JSON.parse(internalAction(saved, task, 'read_artifact', { name: 'paged', offset: 0 }, 'page-1'));
+    const second = JSON.parse(internalAction(saved, task, 'read_artifact', { name: 'paged', offset: first.nextOffset }, 'page-2'));
+    expect(first).toMatchObject({ totalCharacters: content.length, offset: 0, nextOffset: 12000, eof: false });
+    expect(first.content.length).toBe(12000);
+    expect(first.content + second.content).toBe(content);
+    expect(second).toMatchObject({ offset: 12000, nextOffset: content.length, eof: true });
+    const eof = JSON.parse(internalAction(saved, task, 'read_artifact', { name: 'paged', offset: content.length }, 'eof'));
+    expect(eof).toEqual({ totalCharacters: content.length, offset: content.length, nextOffset: content.length, eof: true, content: '' });
+    const empty = JSON.parse(internalAction(saved, task, 'read_artifact', { name: 'empty', offset: 0 }, 'empty'));
+    expect(empty).toEqual({ totalCharacters: 0, offset: 0, nextOffset: 0, eof: true, content: '' });
+    expect(() => internalAction(saved, task, 'read_artifact', { name: 'paged', offset: content.length + 1 }, 'past-end')).toThrow('Offset exceeds saved artifact');
+    expect(() => validateInternal('read_artifact', { name: 'paged', offset: -1 })).toThrow();
+});
+
 it('keeps instructions stable and projects fresh budget state without accumulating it in history', async () => {
     const requests: TurnRequest[] = [];
     const h = await open(model(async request => {

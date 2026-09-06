@@ -380,3 +380,27 @@ control. This small sample does not establish a stable success rate or competito
 advantage. It supports prioritizing deterministic computation and answer verification
 before inventing a new completion-budget policy. No runtime behavior was changed
 during these measurements; earlier failures remain retained.
+
+### Real coding workflow
+
+A Terra agent used Agentic's existing `codingToolRuntime` through a small external
+adapter to the Gears tool contract. In an isolated checkout it implemented artifact
+pagination, added a regression test, ran all 57 harness tests and the build, then
+delegated a read-only review and collected its result. An independent oracle failed
+on the original code and passed on the resulting code, including exact UTF-16
+reconstruction, empty content and offsets beyond EOF. The reviewed patch was adopted.
+Runtime version 7 fences the changed internal tool behavior from persisted older
+compositions; existing instances and data were left untouched.
+
+The initial run stopped at context admission: approximately 18,347 tokens would
+exceed the default 16,000-token ceiling after source reads. A fresh run with an
+explicit 32,000-token coding context completed in 13 model calls, consuming 142,900
+input and 2,072 output tokens. Both attempts and exact journals are retained outside
+source control. The default context budget and read-only CLI remain unchanged.
+
+This demonstrates one useful coding workflow, not reliable autonomous coding or
+competitive efficiency. The adapter reused Agentic validation, authorized arguments
+and cancellation; Gears supplied durable execution and child coordination. The
+trusted local shell was authorized only for this isolated experiment; a working
+directory is not an OS sandbox. Next investigations should focus on bounded source
+inspection and repeated context cost in real tasks before adding more machinery.

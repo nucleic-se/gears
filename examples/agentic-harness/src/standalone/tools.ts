@@ -35,7 +35,7 @@ export const internalDefinitions: ToolDefinition[] = [
     definition('save_progress', 'Replace your durable working notes: decisions, constraints, evidence references and remaining work. Always retained in prepared context.', { notes: text }),
     definition('save_artifact', 'Save a named text artifact for this task tree. Use artifacts for longer findings and retrieve them when needed.', { name: text, content: text }),
     definition('read_tool_result', 'Retrieve exact saved text from this task’s tool history. Returns up to 8000 UTF-16 code units; continue with nextOffset. Use messageIndex from a context reference. Does not rerun the original tool.', { messageIndex: { type: 'integer' }, offset: { type: 'integer' } }, ['messageIndex']),
-    definition('read_artifact', 'Read a bounded slice of a text artifact in this task tree.', { name: text, offset: { type: 'integer' } }, ['name']),
+    definition('read_artifact', 'Read up to 12000 UTF-16 code units from a text artifact in this task tree. Offset and returned nextOffset are UTF-16 code units; use nextOffset to paginate until eof is true.', { name: text, offset: { type: 'integer' } }, ['name']),
 ];
 export function validateInternal(name: string, args: Record<string, unknown>): Record<string, unknown> {
     switch (name) {
@@ -149,7 +149,9 @@ export function internalAction(tree: Tree, task: Task, name: string, args: Recor
             if (!Object.hasOwn(tree.artifacts, args.name as string) || typeof content !== 'string')
                 throw new Error('Artifact does not exist');
             const offset = args.offset as number;
-            return JSON.stringify({ totalCharacters: content.length, offset, content: content.slice(offset, offset + 12000) });
+            if (offset > content.length) throw new Error('Offset exceeds saved artifact');
+            const slice = content.slice(offset, offset + 12000), nextOffset = offset + slice.length;
+            return JSON.stringify({ totalCharacters: content.length, offset, nextOffset, eof: nextOffset === content.length, content: slice });
         }
         default: throw new Error('Unknown internal tool');
     }
