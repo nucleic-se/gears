@@ -322,3 +322,53 @@ it('keeps instructions stable and projects fresh budget state without accumulati
         expect(data.context.usage.messageTokens).toBeGreaterThan(0);
     }
 });
+
+it('recovers referenced evidence from durable history without rerunning the source tool', async () => {
+    const evidence = 'Original evidence\n' + 'x'.repeat(10000) + '\nEXACT TAIL';
+    const read = vi.fn(async () => ({ ok: true, content: evidence }));
+    const path = await mkdtemp(join(tmpdir(), 'standalone-test-')); paths.push(path);
+    let calls = 0;
+    const h = await StandaloneHarness.open({ dataDir: path,
+        tools: [{ definition: { name: 'evidence', description: 'Read evidence', parameters: { type: 'object', properties: {} } }, effect: 'read', validate: () => ({}), execute: read }],
+        provider: model(async request => {
+            switch (calls++) {
+                case 0: return reply('', [tool('evidence', {})]);
+                case 1:
+                    expect(request.messages.find(message => message.role === 'tool_result')?.content).toBe(evidence);
+                    return reply('', [tool('save_progress', { notes: 'Verify the exact end of the earlier evidence.' })]);
+                case 2:
+                    expect(request.messages.find(message => message.role === 'tool_result')?.content).toBe(evidence);
+                    return reply('', [tool('save_progress', { notes: 'Now recover the saved tail.' }, 'progress-again')]);
+                case 3:
+                    expect(request.messages.find(message => message.role === 'tool_result')?.content).toContain('read_tool_result({"messageIndex":2,"offset":0})');
+                    return reply('', [tool('read_tool_result', { messageIndex: 2, offset: 8000 })]);
+                default: {
+                    const retrieved = request.messages.filter(message => message.role === 'tool_result' && message.toolName === 'read_tool_result').at(-1)!;
+                    expect(JSON.parse(retrieved.content)).toMatchObject({ content: evidence.slice(8000), eof: true, nextOffset: evidence.length });
+                    return reply('verified');
+                }
+            }
+        }),
+    }); hosts.push(h);
+    const tree = await h.create('Recover exact evidence');
+    await state(h, tree.id, current => expect(current.tasks[tree.id].answer).toBe('verified'));
+    expect(read).toHaveBeenCalledOnce();
+    const snapshots = await h.inspect(tree.id);
+    expect(JSON.stringify(snapshots.events)).toContain('originalCharacters');
+    expect(snapshots.state.tasks[tree.id].messages[2].content).toBe(evidence);
+    await h.close(); hosts.splice(hosts.indexOf(h), 1);
+    const reopened = await StandaloneHarness.open(h.options); hosts.push(reopened);
+    const saved = (await reopened.store.get(tree.id))!;
+    const { internalAction, validateInternal } = await import('../src/standalone/tools.js');
+    const task = saved.tasks[tree.id];
+    const first = JSON.parse(internalAction(saved, task, 'read_tool_result', { messageIndex: 2, offset: 0 }, 'recover'));
+    const last = JSON.parse(internalAction(saved, task, 'read_tool_result', { messageIndex: 2, offset: first.nextOffset }, 'recover-next'));
+    expect(first.content + last.content).toBe(evidence);
+    expect(first.content.length).toBe(8000);
+    expect(() => internalAction(saved, task, 'read_tool_result', { messageIndex: 0, offset: 0 }, 'invalid')).toThrow('does not exist');
+    expect(() => validateInternal('read_tool_result', { messageIndex: -1 })).toThrow();
+    expect(() => internalAction(saved, task, 'read_tool_result', { messageIndex: 2, offset: evidence.length + 1 }, 'offset')).toThrow('Offset exceeds');
+    const other = await reopened.store.create('Other task', [], reopened.compositionId);
+    expect(() => internalAction(other, other.tasks[other.id], 'read_tool_result', { messageIndex: 2, offset: 0 }, 'isolated')).toThrow('does not exist');
+    expect(read).toHaveBeenCalledOnce();
+});

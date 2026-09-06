@@ -176,3 +176,35 @@ evolving source checkout, not controlled latency or capability comparisons.
 Cache reuse is observed; lower total tokens or faster completion is not.
 The report and trace summary are retained outside source control. Recoverable
 selection/compression of accumulated evidence remains future work.
+
+### Recoverable evidence retention
+
+Agentic now offers an opt-in reference policy for older large tool-result text.
+Gears enables it only when the task has `read_tool_result`, backed by unchanged
+conversation text in its existing database. No child grants are added implicitly.
+The inspector records reference instructions, source indices and retained sizes.
+Tests verify smaller prepared context, source/pair preservation, recent/error/media
+exclusions, protection of references from subsequent compression, bounded exact
+retrieval after reopen, task isolation, and no source-tool replay.
+
+Validation: Agentic build and 482 tests passed; Gears harness build and 31 tests
+passed. The full Terra scenario retained its original delegation instructions,
+request deadline and aggregate budget. Children without retrieval grants did not
+receive reference compression.
+
+Two live acceptance runs passed, including both children, final artifact and
+forced checkpoint restart:
+
+- Initial retention window: 173 seconds, 30 calls, 162,956 input / 7,926 output
+  tokens; two history retrieval calls.
+- Final window (two recent exchanges plus transient state): 157 seconds, 26 calls,
+  120,681 input / 8,000 output tokens; two history retrieval calls and 7,680 cached
+  input tokens. The earlier no-retention pass used 108,233 input / 8,078 output
+  tokens and 21 calls, so overall efficiency is not yet demonstrated.
+
+Restoring the referenced original payloads into the final run's exact recorded
+requests increased their summed estimates by 69,333 tokens. This paired estimate
+measures request size only; it does not predict how the agent would have behaved
+without retention. Reports and the comparison script remain outside source
+control. Deterministic recovery works, but retrieval overhead and semantic
+selection still require broader evaluation before claiming an efficiency gain.

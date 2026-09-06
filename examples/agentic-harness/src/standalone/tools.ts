@@ -34,6 +34,7 @@ export const internalDefinitions: ToolDefinition[] = [
     definition('schedule_self', 'Save progress and release the worker until a future time. On wake, continue this same task. Bounded by the task expiry and shared budget.', { delaySeconds: { type: 'integer' }, reason: text }),
     definition('save_progress', 'Replace your durable working notes: decisions, constraints, evidence references and remaining work. Always retained in prepared context.', { notes: text }),
     definition('save_artifact', 'Save a named text artifact for this task tree. Use artifacts for longer findings and retrieve them when needed.', { name: text, content: text }),
+    definition('read_tool_result', 'Retrieve exact saved text from this task’s tool history. Returns up to 8000 UTF-16 code units; continue with nextOffset. Use messageIndex from a context reference. Does not rerun the original tool.', { messageIndex: { type: 'integer' }, offset: { type: 'integer' } }, ['messageIndex']),
     definition('read_artifact', 'Read a bounded slice of a text artifact in this task tree.', { name: text, offset: { type: 'integer' } }, ['name']),
 ];
 export function validateInternal(name: string, args: Record<string, unknown>): Record<string, unknown> {
@@ -45,6 +46,7 @@ export function validateInternal(name: string, args: Record<string, unknown>): R
         case 'schedule_self': return { delaySeconds: integer(args.delaySeconds, 1, 604800), reason: string(args.reason, 2000) };
         case 'save_progress': return { notes: string(args.notes, 8000) };
         case 'save_artifact': return { name: string(args.name, 100), content: string(args.content, 100000) };
+        case 'read_tool_result': return { messageIndex: integer(args.messageIndex, 0, Number.MAX_SAFE_INTEGER), offset: args.offset === undefined ? 0 : integer(args.offset, 0, Number.MAX_SAFE_INTEGER) };
         case 'read_artifact': return { name: string(args.name, 100), offset: args.offset === undefined ? 0 : integer(args.offset, 0, 100000) };
         default: throw new Error('Unknown tool');
     }
@@ -132,6 +134,15 @@ export function internalAction(tree: Tree, task: Task, name: string, args: Recor
                 throw new Error('Artifact count limit reached');
             tree.artifacts[name] = args.content as string;
             return `Saved ${name}`;
+        }
+        case 'read_tool_result': {
+            const messageIndex = args.messageIndex as number, offset = args.offset as number;
+            const source = task.messages[messageIndex];
+            if (!source || source.role !== 'tool_result') throw new Error('Saved tool result does not exist in this task');
+            if (offset > source.content.length) throw new Error('Offset exceeds saved result');
+            const content = source.content.slice(offset, offset + 8000), nextOffset = offset + content.length;
+            return JSON.stringify({ messageIndex, toolName: source.toolName, totalCharacters: source.content.length,
+                offset, nextOffset, eof: nextOffset === source.content.length, content });
         }
         case 'read_artifact': {
             const content = tree.artifacts[args.name as string];

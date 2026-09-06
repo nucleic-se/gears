@@ -211,3 +211,25 @@ Admission still checks the authoritative shared state atomically.
 The Gears runtime extension is version 3 for this request-layout change. Active
 trees from the prior composition require their original revision; new dogfood
 runs use fresh data directories. Existing data is not migrated or deleted.
+
+### Recovering older tool evidence
+
+The built-in context policy can replace older large text results with short
+previews and `read_tool_result` references. It uses Agentic's shared retention
+policy and only does this when the current task has that tool. Include
+`read_tool_result` in a delegated child's tools to enable recovery there; grants
+are never added implicitly. The two recent exchanges plus the transient state group stay intact, and context reports
+show exactly which older payloads were shortened.
+
+`read_tool_result({ messageIndex, offset })` returns up to 8,000 UTF-16 code units
+from the exact original text stored in this task's conversation. Continue with
+`nextOffset` until `eof`. It cannot address another task, does not reread changed
+files or rerun a tool, and continues to work after restart. Invalid indices and
+out-of-range offsets fail explicitly. Retrieved chunks are not recursively
+replaced with references. This retrieves text, not native media blocks.
+
+The context extension is version 2 for this policy; older active compositions
+must finish on their matching revision. This does not add semantic summaries,
+search across dropped history or a new memory store. Whole groups can still be
+dropped under the context ceiling, so it is not a guarantee of arbitrary-history
+recall.
