@@ -29,7 +29,7 @@ it('delegates two children, collects results, sleeps without a worker and resume
         }
         if (turns === 2)
             return reply('', [tool('save_progress', { notes: 'Both children collected; finish after wake.' }), tool('schedule_self', { delaySeconds: 2, reason: 'restart proof' })]);
-        expect(request.system).toContain('Both children collected');
+        expect(request.messages.at(-1)?.content).toContain('Both children collected');
         expect(JSON.stringify(request.messages)).toContain('result child A');
         expect(JSON.stringify(request.messages)).toContain('result child B');
         return reply('DONE');
@@ -288,4 +288,37 @@ it('counts inherited artifact names as new entries and preserves own entries aft
         expect(() => internalAction(loaded, loaded.tasks[tree.id], 'save_artifact', { name: 'constructor', content: 'replacement' }, 'replace')).not.toThrow();
         expect(Object.keys(loaded.artifacts)).toHaveLength(32);
     } finally { await web.close(); }
+});
+
+it('keeps instructions stable and projects fresh budget state without accumulating it in history', async () => {
+    const requests: TurnRequest[] = [];
+    const h = await open(model(async request => {
+        requests.push(structuredClone(request));
+        return requests.length === 1
+            ? reply('', [tool('save_progress', { notes: 'Keep the source reference for the final answer.' })])
+            : reply('done');
+    }));
+    const tree = await h.create('stable objective');
+    await state(h, tree.id, current => expect(current.tasks[tree.id].phase).toBe('completed'));
+    expect(requests).toHaveLength(2);
+    expect(requests[0].system).toBe(requests[1].system);
+    const stateMessage = (request: TurnRequest) => request.messages.filter(message => message.provenance === 'deterministic');
+    expect(stateMessage(requests[0])).toHaveLength(1);
+    expect(stateMessage(requests[1])).toHaveLength(1);
+    expect(requests[1].messages.at(-1)).toMatchObject({ role: 'user', sticky: true, provenance: 'deterministic' });
+    const first = JSON.parse(stateMessage(requests[0])[0].content.split('\n')[1]);
+    const second = JSON.parse(stateMessage(requests[1])[0].content.split('\n')[1]);
+    expect(first.remainingSharedTokensBeforeThisRequest).toBe(tree.limits.tokens);
+    expect(second.remainingSharedTokensBeforeThisRequest).toBe(tree.limits.tokens - 120);
+    expect(second.remainingTaskCallsIncludingThisTurn).toBe(first.remainingTaskCallsIncludingThisTurn - 1);
+    expect(second.progressNotes).toBe('Keep the source reference for the final answer.');
+    const persisted = (await h.store.get(tree.id))!;
+    expect(persisted.tasks[tree.id].messages.some(message => message.provenance === 'deterministic')).toBe(false);
+    expect(persisted.tasks[tree.id].messages[0].content).toBe('stable objective');
+    const intents = (await h.inspect(tree.id)).events.filter(event => event.type === 'model.intent');
+    for (let index = 0; index < requests.length; index++) {
+        const data = intents[index].data as { intent: { request: TurnRequest }; context: { usage: { messageTokens: number } } };
+        expect(data.intent.request).toEqual(requests[index]);
+        expect(data.context.usage.messageTokens).toBeGreaterThan(0);
+    }
 });

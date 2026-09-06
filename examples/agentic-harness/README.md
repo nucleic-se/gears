@@ -193,3 +193,21 @@ The snapshot describes committed harness state, not arbitrary extension internal
 or provider-private processing. Before request admission, selected context may not
 exist yet. An intent alone does not prove dispatch. JSON exports include task and
 tool content and inherit the UI's authentication boundary.
+
+### Stable instructions and current state
+
+The Gears composition keeps its system instructions stable. Each request ends
+with one protected, host-generated state message containing current call/token
+availability, progress notes and artifact names. That message is counted by the
+shared Agentic context pipeline and retained in the exact request intent, but is
+not appended to conversation history. Later requests replace it with fresh state.
+Progress notes remain untrusted agent content, not system instructions.
+
+This preserves a stable prefix where selected history permits it; provider cache
+hits or token-cost savings are not guaranteed. Resource figures are a snapshot
+before request admission, and concurrent children can consume budget afterward.
+Admission still checks the authoritative shared state atomically.
+
+The Gears runtime extension is version 3 for this request-layout change. Active
+trees from the prior composition require their original revision; new dogfood
+runs use fresh data directories. Existing data is not migrated or deleted.

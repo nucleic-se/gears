@@ -149,3 +149,30 @@ membership and reads. Missing inherited names return HTTP 404; legitimate saved
 names such as `constructor` remain readable after storage reload and count toward
 the 32-artifact limit. The harness build and 29 tests passed. The live run preceded
 this small artifact fix; its behavior is covered by the regression test.
+
+### Stable instructions and transient state
+
+Gears now uses stable system instructions and one fresh, protected state message
+at the request tail. It includes the remaining shared token budget as well as
+call limits, progress and artifact names. Existing Agentic provenance, sticky
+message protection, accounting and intent recording provide this behavior; no
+new Agentic abstraction or context protocol was added. Runtime extension version
+3 prevents silently changing the layout of active version-2 compositions.
+
+Build and 30 harness tests passed. A new regression verifies stable instructions,
+updated counters/progress, no accumulation of transient state in durable history,
+and exact request inspection. The restart test still verifies delivery of saved
+progress after reopening, now through the state message.
+
+The full Terra source-review/restart scenario passed again with unchanged limits:
+145 seconds, 21 model calls, 108,233 reported input and 8,078 output tokens.
+Receipts showed 17,408 cached input tokens (a subset of input, not additional
+usage). All 21 request snapshots had identical system instructions and exactly
+one deterministic state message. The longest request was 59.6 seconds.
+
+The previous Terra pass took 133 seconds and used 107,321 input / 6,583 output
+tokens with zero cache reads. These are individual stochastic task runs over an
+evolving source checkout, not controlled latency or capability comparisons.
+Cache reuse is observed; lower total tokens or faster completion is not.
+The report and trace summary are retained outside source control. Recoverable
+selection/compression of accumulated evidence remains future work.
