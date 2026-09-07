@@ -828,7 +828,7 @@ it.each([false, true])('journals automatic checkpoints atomically (partial=%s)',
     const { internalDefinitions } = await import('../src/standalone/tools.js');
     let maintenanceCalls = 0;
     const h = await open(model(async request => {
-        if (request.system?.startsWith('Maintain a concise working checkpoint')) {
+        if (/^(Maintain a concise working checkpoint|Repair a rejected working checkpoint)/.test(request.system ?? '')) {
             maintenanceCalls++;
             expect(request.tools).toEqual([]);
             expect(request.messages[0].content).toContain('recorded detail');
@@ -870,7 +870,7 @@ it('checkpoints at the reported context threshold before dropping or shortening 
     const context = budgetedContext('', 6000, { minRecentGroups: 3 });
     let inspected = false, maintenance = 0;
     const h = await open(model(async request => {
-        if (request.system?.startsWith('Maintain a concise working checkpoint')) {
+        if (/^(Maintain a concise working checkpoint|Repair a rejected working checkpoint)/.test(request.system ?? '')) {
             maintenance++;
             expect(request.messages[0].content).toContain('recorded detail');
             return reply('Earlier observations preserved. Finish the audit.');
@@ -924,7 +924,7 @@ it.each([false, true])('continues a persisted partial source checkpoint atomical
     const giant = 'saved evidence '.repeat(8000);
     let chunks = 0;
     const provider = model(async request => {
-        if (request.system?.startsWith('Maintain a concise working checkpoint')) {
+        if (/^(Maintain a concise working checkpoint|Repair a rejected working checkpoint)/.test(request.system ?? '')) {
             const evidence = JSON.parse(request.messages[0].content);
             if (evidence.sourceChunk) {
                 chunks++;
@@ -968,20 +968,22 @@ it.each([false, true])('bounds rejected checkpoint retries and preserves source 
     let rejected = false;
     let retries = 0;
     const h = await open(model(async request => {
-        if (!request.system?.startsWith('Maintain a concise working checkpoint')) return reply('done');
+        if (!/^(Maintain a concise working checkpoint|Repair a rejected working checkpoint)/.test(request.system ?? '')) return reply('done');
         const evidence = JSON.parse(request.messages[0].content);
         expect(evidence.output.maxCharacters).toBe(8000);
         if (evidence.rejectedDraft) {
             expect(evidence.rejectedDraft).toBe('too_large');
+            expect(evidence.draft).toBe('x'.repeat(8591));
+            expect(evidence.sources).toBeUndefined();
             retries++;
         }
         if (!rejected || alwaysReject) { rejected = true; return reply('x'.repeat(8591)); }
         return reply('Inspections recorded. Verification remains unfinished.');
-    }), undefined, { contextTokens: 2000, outputTokens: 64 });
+    }), undefined, { contextTokens: 3000, outputTokens: 64 });
     const tree = await h.store.create('audit', internalDefinitions.map(t => t.name), h.compositionId);
     await h.store.change(tree.id, 'fixture.history', current => {
         const task = current.tasks[tree.id];
-        task.messages.push(...Array.from({ length: 20 }, (_, index) => ({ role: 'assistant' as const, content: `recorded detail ${index}: ${'evidence '.repeat(28)}` })), { role: 'user', content: 'Finish the audit.' });
+        task.messages.push(...Array.from({ length: 40 }, (_, index) => ({ role: 'assistant' as const, content: `recorded detail ${index}: ${'evidence '.repeat(28)}` })), { role: 'user', content: 'Finish the audit.' });
         task.checkpoint = { through: 1, text: 'Prior valid checkpoint' };
         task.notes = 'Verification remains unfinished';
     });
@@ -1008,12 +1010,13 @@ it('retains a committed checkpoint rejection across reopen without renewing its 
     const { internalDefinitions } = await import('../src/standalone/tools.js');
     let calls = 0;
     const provider = model(async request => {
-        expect(request.system).toContain('Maintain a concise working checkpoint');
+        expect(request.system).toContain(calls ? 'Repair a rejected working checkpoint' : 'Maintain a concise working checkpoint');
         const input = JSON.parse(request.messages[0].content);
         expect(input.rejectedDraft).toBe(calls++ ? 'too_large' : undefined);
+        if (calls === 2) expect(input.draft).toBe('x'.repeat(8591));
         return reply('x'.repeat(8591));
     });
-    const options = { contextTokens: 2000, outputTokens: 64 };
+    const options = { contextTokens: 3000, outputTokens: 64 };
     const h = await open(provider, undefined, options);
     // Pause at the committed rejection boundary, before another worker turn can start.
     const change = h.store.change.bind(h.store);
@@ -1025,18 +1028,18 @@ it('retains a committed checkpoint rejection across reopen without renewing its 
         }, taskId, data));
     const tree = await h.store.create('audit', internalDefinitions.map(t => t.name), h.compositionId);
     await h.store.change(tree.id, 'fixture.history', current => {
-        current.tasks[tree.id].messages.push(...Array.from({ length: 20 }, (_, index) => ({ role: 'assistant' as const, content: `recorded detail ${index}: ${'evidence '.repeat(28)}` })));
+        current.tasks[tree.id].messages.push(...Array.from({ length: 40 }, (_, index) => ({ role: 'assistant' as const, content: `recorded detail ${index}: ${'evidence '.repeat(28)}` })));
         current.tasks[tree.id].checkpoint = { through: 1, text: 'Original checkpoint' };
     });
     await h.reconcile();
     await state(h, tree.id, current => expect(current.tasks[tree.id].phase).toBe('paused'));
     const before = (await h.store.get(tree.id))!;
-    expect(before.tasks[tree.id].checkpointRejection).toBe('too_large');
+    expect(before.tasks[tree.id].checkpointRejection?.reason).toBe('too_large');
     expect(calls).toBe(1);
     stopAtBoundary.mockRestore();
     await h.close(); hosts.splice(hosts.indexOf(h), 1);
     const reopened = await open(provider, h.options.dataDir, options);
-    expect((await reopened.store.get(tree.id))!.tasks[tree.id].checkpointRejection).toBe('too_large');
+    expect((await reopened.store.get(tree.id))!.tasks[tree.id].checkpointRejection?.reason).toBe('too_large');
     await reopened.send(tree.id, tree.id, 'Continue');
     await state(reopened, tree.id, current => expect(current.tasks[tree.id].phase).toBe('failed'));
     const after = (await reopened.store.get(tree.id))!;

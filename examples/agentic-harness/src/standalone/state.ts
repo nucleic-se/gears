@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { sql, type Kysely } from 'kysely';
 import type { Message, UserMessage, ToolCall, TokenUsage } from '@nucleic-se/agentic/llm';
-import type { WorkingCheckpoint, CheckpointRejection } from '@nucleic-se/agentic/harness';
+import type { WorkingCheckpoint, RejectedCheckpoint } from '@nucleic-se/agentic/harness';
 import type { ExecutionJournal } from '@nucleic-se/agentic/execution';
 export type Phase = 'ready' | 'model' | 'tools' | 'external' | 'waiting' | 'sleeping' | 'paused' | 'completed' | 'failed' | 'unknown' | 'cancelled';
 export interface Task {
@@ -17,7 +17,7 @@ export interface Task {
     activeTool?: ToolCall;
     notes: string;
     checkpoint?: WorkingCheckpoint;
-    checkpointRejection?: CheckpointRejection;
+    checkpointRejection?: RejectedCheckpoint;
     children: string[];
     tools: string[];
     depth: number;
