@@ -61,9 +61,10 @@ export class StandaloneHarness {
         if (options.context && !options.composition) throw new Error('Custom context requires an explicit composition identity');
         return createHarness().compose({
             extensions: [
-                { id: 'runtime.gears', version: '17', apiVersion: 1, configuration: JSON.stringify({ projectInstructions: options.projectInstructions ?? [], checkpointing: options.checkpointing ?? true, modelTimeoutMs, outputTokens: options.outputTokens ?? 1800, tools: (options.tools ?? []).map(tool => ({ definition: tool.definition, effect: tool.effect })) }), roles: { runtime: () => StandaloneHarness.openRuntime(options) } },
+                { id: 'runtime.gears', version: '18', apiVersion: 1, configuration: JSON.stringify({ projectInstructions: options.projectInstructions ?? [], checkpointing: options.checkpointing ?? true, modelTimeoutMs, outputTokens: options.outputTokens ?? 1800, tools: (options.tools ?? []).map(tool => ({ definition: tool.definition, effect: tool.effect })) }), roles: { runtime: () => StandaloneHarness.openRuntime(options) } },
                 { id: 'provider.gears', version: '1', apiVersion: 1, roles: { provider: () => options.provider } },
-                { id: 'context.gears', version: '13', apiVersion: 1, configuration: JSON.stringify({ tokens: options.contextTokens ?? 16000, custom: options.context ? options.composition : undefined }), roles: { context: () => options.context ?? budgetedContext('', options.contextTokens ?? 16000, {
+                { id: 'context.gears', version: '14', apiVersion: 1, configuration: JSON.stringify({ tokens: options.contextTokens ?? 16000, custom: options.context ? options.composition : undefined }), roles: { context: () => options.context ?? budgetedContext('', options.contextTokens ?? 16000, {
+                    includeToolCallIds: (options.tools ?? []).some(tool => tool.definition.name === 'memory_save'),
                     minRecentGroups: 3, // Two recent exchanges plus the transient state message.
                     referenceToolResult: (message, index, tools) => !['read_tool_result', 'read_output'].includes(message.toolName ?? '') && tools.some(tool => tool.name === 'read_tool_result')
                         ? `read_tool_result(${JSON.stringify({ callId: message.toolCallId, offset: 0 })})` : null,
@@ -558,7 +559,7 @@ export class StandaloneHarness {
                 }
                 const plugin = this.plugins.get(name)!;
                 try {
-                    return await plugin.execute(args, signal);
+                    return await plugin.execute(args, signal, { ...context, sessionId: `${tree.id}/${task.id}` });
                 }
                 catch (error) {
                     return { ok: false, content: String(error), errorKind: plugin.effect === 'read' ? 'runtime' : 'unknown' };

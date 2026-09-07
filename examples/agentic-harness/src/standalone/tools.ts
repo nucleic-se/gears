@@ -1,13 +1,13 @@
 import { createHash } from 'node:crypto';
 import type { ToolDefinition } from '@nucleic-se/agentic/llm';
-import type { ToolCallResult } from '@nucleic-se/agentic/tool-runtime';
+import type { ToolCallResult, ToolCallOptions } from '@nucleic-se/agentic/tool-runtime';
 import { readArchivedToolResult } from '@nucleic-se/agentic/harness';
 import { newTask, terminal, type Tree, type Task } from './state.js';
 export interface HarnessTool {
     definition: ToolDefinition;
     effect: 'read' | 'write';
     validate(args: Record<string, unknown>): Record<string, unknown>;
-    execute(args: Record<string, unknown>, signal: AbortSignal): Promise<ToolCallResult>;
+    execute(args: Record<string, unknown>, signal: AbortSignal, context?: ToolCallOptions): Promise<ToolCallResult>;
 }
 export function string(value: unknown, max = 8000): string {
     if (typeof value !== 'string' || !value.trim() || value.length > max)

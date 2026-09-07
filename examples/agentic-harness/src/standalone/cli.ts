@@ -5,6 +5,9 @@ import { StandaloneHarness } from './host.js';
 import { readProjectInstructions } from '@nucleic-se/agentic/harness';
 import { attachWeb } from './web.js';
 import { codingTools } from './coding.js';
+import { realpathSync } from 'node:fs';
+import { SqliteMemoryStore } from '@nucleic-se/agentic/runtime';
+import { memoryTools } from './memory.js';
 const args = process.argv.slice(2);
 function option(name: string, fallback: string) {
     const index = args.indexOf(name);
@@ -21,14 +24,16 @@ const hostname = option('--host', '127.0.0.1'), port = Number(option('--port', '
 const model = option('--model', 'gpt-6-astra');
 const modelTimeoutMs = Number(option('--model-timeout-ms', '300000'));
 const coding = args.includes('--coding');
-const host = await StandaloneHarness.open({ dataDir, modelTimeoutMs, provider: new SubscriptionProvider({ model, reasoningEffort: 'low' }),
-    tools: codingTools(workspace, resolve(dataDir, 'outputs'), !coding),
+const memory = args.includes('--memory') ? await SqliteMemoryStore.open(resolve(dataDir, 'memory.sqlite'), realpathSync(workspace)) : undefined;
+let host: StandaloneHarness;
+try { host = await StandaloneHarness.open({ dataDir, modelTimeoutMs, provider: new SubscriptionProvider({ model, reasoningEffort: 'low' }),
+    tools: [...codingTools(workspace, resolve(dataDir, 'outputs'), !coding), ...(memory ? memoryTools(memory, () => host) : [])],
     projectInstructions: await readProjectInstructions(workspace), composition: `default-v3:${workspace}:${model}`,
     extensions: webEnabled ? [{ id: 'ui.web', version: '1', apiVersion: 1, activate: async client => {
         const web = await attachWeb(client, { token: token!, port, hostname });
         return () => web.close();
     } }] : [],
-});
+}); } catch (error) { await memory?.close(); throw error; }
 try {
     console.log(JSON.stringify({ type: 'ready', ...(webEnabled ? { url: `http://${hostname}:${port}`, token } : {}), workspace, dataDir, coding }));
     process.send?.({ type: 'ready' });
@@ -54,6 +59,6 @@ try {
     await new Promise<void>(resolve => { process.once('SIGINT', () => resolve()); process.once('SIGTERM', () => resolve()); });
 }
 finally {
-    await host.close();
+    try { await host.close(); } finally { await memory?.close(); }
     if (process.connected) process.disconnect?.();
 }
