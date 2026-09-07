@@ -367,21 +367,20 @@ it('requires a nonempty UI token', async () => {
     await expect(attachWeb(h, { token: '', port: 0 })).rejects.toThrow('nonempty');
 });
 it('reads UTF-8 chunks without corruption and bounds directory enumeration', async () => {
-    const { workspaceTools } = await import('../src/standalone/tools.js');
+    const { codingTools } = await import('../src/standalone/coding.js');
     const { writeFile } = await import('node:fs/promises');
     const path = await mkdtemp(join(tmpdir(), 'standalone-test-'));
     paths.push(path);
     const content = 'a'.repeat(15999) + '🌿rest';
     await writeFile(join(path, '..notes'), content);
-    const tools = await workspaceTools(path), read = tools.find(t => t.definition.name === 'read_file')!, signal = new AbortController().signal;
-    const first = JSON.parse((await read.execute({ path: '..notes', offset: 0 }, signal)).content);
-    const second = JSON.parse((await read.execute({ path: '..notes', offset: first.nextOffset }, signal)).content);
+    const tools = codingTools(path, join(path, 'outputs'), true), read = tools.find(t => t.definition.name === 'fs_read')!, signal = new AbortController().signal;
+    const first = JSON.parse((await read.execute({ mode: 'bytes', path: '..notes', offset: 0 }, signal)).content);
+    const second = JSON.parse((await read.execute({ mode: 'bytes', path: '..notes', offset: first.nextOffset }, signal)).content);
     expect(first.content + second.content).toBe(content);
     expect(second.eof).toBe(true);
     await Promise.all(Array.from({ length: 205 }, (_, i) => writeFile(join(path, `file${i}`), '')));
-    const listing = JSON.parse((await tools.find(t => t.definition.name === 'list_files')!.execute({ path: '.' }, signal)).content);
-    expect(listing.entries).toHaveLength(200);
-    expect(listing.truncated).toBe(true);
+    const listing = await tools.find(t => t.definition.name === 'fs_list')!.execute({ path: '.' }, signal);
+    expect(listing.data).toMatchObject({ count: 200, truncated: true });
 });
 it('reserves shared token budget before concurrent child dispatch', async () => {
     let release!: () => void;
@@ -415,12 +414,12 @@ it('does not scan completed trees during background reconciliation and can reope
 it('rejects a FIFO without blocking its read tool', async () => {
     if (process.platform === 'win32')
         return;
-    const { execFileSync } = await import('node:child_process'), { workspaceTools } = await import('../src/standalone/tools.js');
+    const { execFileSync } = await import('node:child_process'), { codingTools } = await import('../src/standalone/coding.js');
     const path = await mkdtemp(join(tmpdir(), 'standalone-test-'));
     paths.push(path);
     execFileSync('mkfifo', [join(path, 'pipe')]);
-    const tools = await workspaceTools(path);
-    await expect(tools.find(t => t.definition.name === 'read_file')!.execute({ path: 'pipe', offset: 0 }, new AbortController().signal)).rejects.toThrow('regular file');
+    const tools = codingTools(path, join(path, 'outputs'), true);
+    expect(await tools.find(t => t.definition.name === 'fs_read')!.execute({ path: 'pipe' }, new AbortController().signal)).toMatchObject({ ok: false, content: expect.stringContaining('regular file') });
 });
 it('refuses incompatible startup without destroying resumable work', async () => {
     const provider = model(async () => reply('resumed')), first = await open(provider);
@@ -620,12 +619,12 @@ it('recovers referenced evidence from durable history without rerunning the sour
 });
 
 it.each([{ suffix: [0xff] }, { suffix: [0xe2, 0x82] }, { suffix: [0xc0, 0xaf] }])('rejects malformed UTF-8 at EOF rather than returning a shortened success: $suffix', async ({ suffix }) => {
-    const { workspaceTools } = await import('../src/standalone/tools.js');
+    const { codingTools } = await import('../src/standalone/coding.js');
     const { writeFile } = await import('node:fs/promises');
     const path = await mkdtemp(join(tmpdir(), 'standalone-test-')); paths.push(path);
     await writeFile(join(path, 'invalid'), Buffer.concat([Buffer.from('valid prefix'), Buffer.from(suffix)]));
-    const read = (await workspaceTools(path)).find(tool => tool.definition.name === 'read_file')!;
-    await expect(read.execute({ path: 'invalid', offset: 0 }, new AbortController().signal)).rejects.toThrow();
+    const read = (codingTools(path, join(path, 'outputs'), true)).find(tool => tool.definition.name === 'fs_read')!;
+    for (const mode of ['lines', 'bytes']) expect(await read.execute({ path: 'invalid', mode }, new AbortController().signal)).toMatchObject({ ok: false });
 });
 
 
@@ -697,21 +696,21 @@ it('refuses a timeout-policy change for a persisted active composition', async (
 
 
 it('honors requested byte limits and continues across UTF-8 boundaries', async () => {
-    const { workspaceTools } = await import('../src/standalone/tools.js');
+    const { codingTools } = await import('../src/standalone/coding.js');
     const { writeFile } = await import('node:fs/promises');
     const path = await mkdtemp(join(tmpdir(), 'standalone-test-')); paths.push(path);
     await writeFile(join(path, 'text'), 'abc😀tail');
-    const read = (await workspaceTools(path)).find(tool => tool.definition.name === 'read_file')!;
+    const read = (codingTools(path, join(path, 'outputs'), true)).find(tool => tool.definition.name === 'fs_read')!;
     const signal = new AbortController().signal;
-    const first = JSON.parse((await read.execute(read.validate({ path: 'text', limit: 5 }), signal)).content);
+    const first = JSON.parse((await read.execute(read.validate({ mode: 'bytes', path: 'text', limit: 5 }), signal)).content);
     expect(first).toMatchObject({ content: 'abc', bytesRead: 3, nextOffset: 3, eof: false });
-    const second = JSON.parse((await read.execute(read.validate({ path: 'text', offset: first.nextOffset, limit: 4 }), signal)).content);
+    const second = JSON.parse((await read.execute(read.validate({ mode: 'bytes', path: 'text', offset: first.nextOffset, limit: 4 }), signal)).content);
     expect(second).toMatchObject({ content: '😀', bytesRead: 4, nextOffset: 7, eof: false });
-    const last = JSON.parse((await read.execute(read.validate({ path: 'text', offset: second.nextOffset, limit: 4 }), signal)).content);
+    const last = JSON.parse((await read.execute(read.validate({ mode: 'bytes', path: 'text', offset: second.nextOffset, limit: 4 }), signal)).content);
     expect(last).toMatchObject({ content: 'tail', bytesRead: 4, nextOffset: 11, eof: true });
-    await expect(read.execute(read.validate({ path: 'text', offset: 3, limit: 1 }), signal)).rejects.toThrow('increase limit');
-    for (const limit of [0, -1, 1.5, 16001]) expect(() => read.validate({ path: 'text', limit })).toThrow();
-    expect(read.validate({ path: 'text' }).limit).toBe(16000);
+    expect(await read.execute(read.validate({ mode: 'bytes', path: 'text', offset: 3, limit: 1 }), signal)).toMatchObject({ ok: false, content: expect.stringContaining('increase limit') });
+    for (const limit of [0, -1, 1.5, 16001]) expect(() => read.validate({ mode: 'bytes', path: 'text', limit })).toThrow();
+    expect(JSON.parse((await read.execute(read.validate({ mode: 'bytes', path: 'text' }), signal)).content)).toMatchObject({ content: 'abc😀tail', eof: true });
 });
 
 it('presents recent diagnostics within context while retaining exact retrievable evidence', async () => {

@@ -1,7 +1,4 @@
 import { createHash } from 'node:crypto';
-import { realpath, opendir, open } from 'node:fs/promises';
-import { constants } from 'node:fs';
-import { resolve, relative, isAbsolute, sep } from 'node:path';
 import type { ToolDefinition } from '@nucleic-se/agentic/llm';
 import type { ToolCallResult } from '@nucleic-se/agentic/tool-runtime';
 import { readArchivedToolResult } from '@nucleic-se/agentic/harness';
@@ -159,63 +156,3 @@ export function childResults(tree: Tree, ids: string[]) {
     return JSON.stringify(ids.map(id => ({ id, status: tree.tasks[id].phase, answer: tree.tasks[id].answer?.slice(0, 12000), error: tree.tasks[id].error })));
 }
 /** Read-only workspace extension. Realpath confinement is not an OS sandbox against hostile filesystem races. */
-export async function workspaceTools(directory: string): Promise<HarnessTool[]> {
-    const root = await realpath(directory);
-    async function confined(path: string) {
-        const actual = await realpath(resolve(root, path)), rel = relative(root, actual);
-        if ((rel === '..' || rel.startsWith('..' + sep)) || isAbsolute(rel))
-            throw new Error('Path escapes workspace');
-        return actual;
-    }
-    return [
-        { effect: 'read', definition: definition('list_files', 'List up to 200 entries in a workspace directory.', { path: text }),
-            validate: args => ({ path: string(args.path, 1000) }),
-            async execute(args, signal) {
-                const entries: Array<{
-                    name: string;
-                    directory: boolean;
-                }> = [];
-                const directory = await opendir(await confined(args.path as string));
-                let truncated = false;
-                for await (const entry of directory) {
-                    signal.throwIfAborted();
-                    if (entries.length === 200) {
-                        truncated = true;
-                        break;
-                    }
-                    entries.push({ name: entry.name, directory: entry.isDirectory() });
-                }
-                return { ok: true, content: JSON.stringify({ entries, truncated }) };
-            } },
-        { effect: 'read', definition: definition('read_file', 'Read a bounded UTF-8 slice. Offset and limit are bytes; limit defaults to 16000 (maximum). Request smaller slices for focused verification. Use returned nextOffset to continue. Rejects invalid UTF-8.', { path: text, offset: { type: 'integer' }, limit: { type: 'integer', minimum: 1, maximum: 16000 } }, ['path']),
-            validate: args => ({ path: string(args.path, 1000), offset: args.offset === undefined ? 0 : integer(args.offset, 0, 100000000), limit: args.limit === undefined ? 16000 : integer(args.limit, 1, 16000) }),
-            async execute(args, signal) {
-                signal.throwIfAborted();
-                const file = await open(await confined(args.path as string), constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOFOLLOW);
-                try {
-                    const stat = await file.stat();
-                    if (!stat.isFile())
-                        throw new Error('Not a regular file');
-                    signal.throwIfAborted();
-                    const buffer = Buffer.alloc(args.limit === undefined ? 16000 : integer(args.limit, 1, 16000)), read = await file.read(buffer, 0, buffer.length, args.offset as number);
-                    signal.throwIfAborted();
-                    const decoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
-                    let content: string;
-                    try {
-                        // Buffer only a valid partial character at a chunk boundary, never invalid bytes at EOF.
-                        const more = (args.offset as number) + read.bytesRead < stat.size;
-                        content = decoder.decode(buffer.subarray(0, read.bytesRead), { stream: more });
-                    } catch {
-                        throw new Error('File is not UTF-8 or offset splits a character');
-                    }
-                    const consumed = Buffer.byteLength(content, 'utf8');
-                    if (read.bytesRead > 0 && consumed === 0) throw new Error('Read limit cannot fit the next UTF-8 character; increase limit');
-                    const nextOffset = (args.offset as number) + consumed;
-                    return { ok: true, content: JSON.stringify({ bytes: stat.size, offset: args.offset, bytesRead: consumed, nextOffset, eof: nextOffset >= stat.size, content }) };
-                }
-                finally {
-                    await file.close();
-                }
-            } },
-    ];
-}

@@ -293,7 +293,8 @@ through inspection. No one scenario substitutes for the other checks.
 
 ### Focused source reads
 
-`read_file` accepts an optional byte `limit` from 1 to 16,000 (default 16,000).
+`fs_read` defaults to numbered line pages. With `mode: "bytes"`, it accepts a
+zero-based byte offset and a byte `limit` from 1 to 16,000 (default 16,000).
 The returned `bytesRead` can be smaller to preserve a UTF-8 character boundary;
 continue using `nextOffset`. A limit too small to fit the next character returns
 an error asking for a larger limit. This lets the model request focused evidence
@@ -314,7 +315,7 @@ tool result, not bytes a source tool already discarded. The coding runtime addit
 to its 8 MiB capture limit and exposes `read_output`; both retrieval tools are
 excluded from recursive presentation. Grant `read_output` alongside `shell_run`
 in coding compositions and keep their output directory with the task data.
-The default read-only CLI remains unchanged. Older persisted tasks require their
+The default CLI uses the read-only subset of the shared coding pack. Older persisted tasks require their
 original context composition. Child-completion messages are not yet budgeted as
 a batch by this option.
 
@@ -336,6 +337,11 @@ The default CLI remains read-only. The shared pack has eight tools: `fs_read`,
 `read_output`. Saved command output stays under the task data directory.
 The Gears adapter owns no file or shell behavior; validation, execution, output
 capture and effect classification come from Agentic.
+
+The old `read_file` and `list_files` tools have been removed. Read-only mode exposes
+`fs_read`, `fs_list`, `search_grep`, `search_find`, and `read_output`; it does not
+register the three write-classified tools. Tool manifest changes require existing
+tasks to finish under their original composition.
 
 ## Experimental working checkpoints
 
