@@ -16,7 +16,7 @@ it('uses shared note capture and recalls source evidence in another task after r
         const results = request.messages.filter(message => message.role === 'tool_result');
         if (learning) return results.length ? reply() : reply([
             { id: 'source', name: 'read_build', args: {} },
-            { id: 'save', name: 'memory_save', args: { key: 'build', note: 'Use npm run verify', callId: 'source' } },
+            { id: 'save', name: 'memory_save', args: { key: 'build', note: 'Use npm run verify', callId: 'source', limit: 20 } },
         ]);
         if (!results.length) return reply([{ id: 'search', name: 'memory_search', args: { text: 'build' } }]);
         if (results.length === 1) {
@@ -24,14 +24,17 @@ it('uses shared note capture and recalls source evidence in another task after r
             const [hit] = JSON.parse(results[0].content.slice(results[0].content.indexOf('\n') + 1));
             return reply([{ id: 'read', name: 'memory_read', args: { id: hit.id, version: hit.version } }]);
         }
-        return reply();
+        const value = JSON.parse(results.at(-1)!.content.slice(results.at(-1)!.content.indexOf('\n') + 1));
+        if (value.eof === true) return reply();
+        const [hit] = JSON.parse(results[0].content.slice(results[0].content.indexOf('\n') + 1));
+        return reply([{ id: `page-${results.length}`, name: 'memory_read', args: { id: hit.id, version: hit.version, sourceOffset: value.nextOffset ?? 0 } }]);
     } };
     let host: StandaloneHarness | undefined, memory: SqliteMemoryStore | undefined;
     const open = async () => {
         memory = await SqliteMemoryStore.open(join(root, 'notes.sqlite'), root);
         host = await StandaloneHarness.open({ dataDir: root, provider, tools: [
             { definition: { name: 'read_build', description: 'Read recorded build instructions', parameters: { type: 'object', properties: {} } },
-                effect: 'read', validate: args => args, execute: async () => ({ ok: true, content: 'Use npm run verify' }) },
+                effect: 'read', validate: args => args, execute: async () => ({ ok: true, content: 'Use npm run verify\n' + 'x'.repeat(8500) + '\noriginal tail' }) },
             ...memoryTools(memory, () => host!),
         ] });
     };
@@ -47,6 +50,11 @@ it('uses shared note capture and recalls source evidence in another task after r
         const read = messages.find(message => message.role === 'tool_result' && message.toolName === 'memory_read');
         const note = JSON.parse(read!.content);
         expect(note.source).toContain(`tree/${first.id}/task/${first.id}/message/`);
-        expect(note.value.evidence).toMatchObject({ content: 'Use npm run verify', isError: false });
+        expect(note.value.evidence.content).toHaveLength(20);
+        expect(note.value.evidence.isError).toBe(false);
+        const pages = messages.filter(message => message.role === 'tool_result' && message.toolName === 'memory_read')
+            .slice(1).map(message => JSON.parse(message.content));
+        expect(pages.map(page => page.content).join('')).toBe('Use npm run verify\n' + 'x'.repeat(8500) + '\noriginal tail');
+        expect(pages.at(-1).eof).toBe(true);
     } finally { await host?.close(); await memory?.close(); await rm(root, { recursive: true, force: true }); }
 });

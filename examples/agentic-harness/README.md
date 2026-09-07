@@ -433,7 +433,7 @@ Gears owns lease checks, shared-budget admission, queue scheduling and atomic
 state/receipt commits. Agentic owns source views, checkpoint fitting and cursors,
 lossless source preparation, model dispatch and tool-message conversion. The host
 supplies transient state to `checkpointView` instead of manually adjusting indexes.
-# Optional workspace recall
+## Optional workspace recall
 
 Add `--memory` to enable explicit workspace notes alongside the configured coding
 tools. Agentic owns bounded note capture, lexical search and immutable revisions;
@@ -449,3 +449,9 @@ observations to verify, not instructions. No automatic recall or background note
 generation is enabled. Runtime composition version 18 passes host session identity
 through the shared tool boundary. Restart/source integration checks pass; measured
 live-task benefit remains under evaluation.
+
+Notes can also page the complete original receipt after restart: pass `sourceOffset`
+to `memory_read`, then follow `nextOffset` until `eof`. Gears resolves the stored
+task/message reference; Agentic verifies its fingerprint and returns bounded pages.
+The original tool is never rerun. If the source archive is missing or changed,
+the captured excerpt remains available and source paging reports the problem.
