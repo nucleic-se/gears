@@ -587,6 +587,7 @@ it('recovers referenced evidence from durable history without rerunning the sour
     const { internalAction, validateInternal } = await import('../src/standalone/tools.js');
     const task = saved.tasks[tree.id];
     const first = JSON.parse(internalAction(saved, task, 'read_tool_result', { messageIndex: 2, offset: 0 }, 'recover'));
+    expect(first).toMatchObject({ messageIndex: 2, callId: 'evidence' });
     const last = JSON.parse(internalAction(saved, task, 'read_tool_result', { messageIndex: 2, offset: first.nextOffset }, 'recover-next'));
     expect(first.content + last.content).toBe(evidence);
     expect(first.content.length).toBe(8000);

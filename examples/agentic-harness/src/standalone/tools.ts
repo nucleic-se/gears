@@ -4,6 +4,7 @@ import { constants } from 'node:fs';
 import { resolve, relative, isAbsolute, sep } from 'node:path';
 import type { ToolDefinition } from '@nucleic-se/agentic/llm';
 import type { ToolCallResult } from '@nucleic-se/agentic/tool-runtime';
+import { readArchivedToolResult } from '@nucleic-se/agentic/harness';
 import { newTask, terminal, type Tree, type Task } from './state.js';
 export interface HarnessTool {
     definition: ToolDefinition;
@@ -137,15 +138,10 @@ export function internalAction(tree: Tree, task: Task, name: string, args: Recor
             return `Saved ${name}`;
         }
         case 'read_tool_result': {
-            const matches = args.callId === undefined ? [args.messageIndex as number] : task.messages.flatMap((message, index) => message.role === 'tool_result' && message.toolCallId === args.callId ? [index] : []);
-            if (matches.length !== 1) throw new Error('Saved tool call is missing or ambiguous in this task');
-            const messageIndex = matches[0], offset = args.offset as number;
-            const source = task.messages[messageIndex];
-            if (!source || source.role !== 'tool_result') throw new Error('Saved tool result does not exist in this task');
-            if (offset > source.content.length) throw new Error('Offset exceeds saved result');
-            const content = source.content.slice(offset, offset + 8000), nextOffset = offset + content.length;
-            return JSON.stringify({ messageIndex, toolName: source.toolName, totalCharacters: source.content.length,
-                offset, nextOffset, eof: nextOffset === source.content.length, content });
+            return JSON.stringify(readArchivedToolResult(task.messages, {
+                messageIndex: args.messageIndex as number | undefined,
+                callId: args.callId as string | undefined, offset: args.offset as number,
+            }));
         }
         case 'read_artifact': {
             const content = tree.artifacts[args.name as string];
