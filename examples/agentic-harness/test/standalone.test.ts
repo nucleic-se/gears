@@ -23,6 +23,21 @@ it.each([0, -1, 1.5, NaN, Infinity])('rejects invalid output allowance %s before
     expect(await host.store.list()).toEqual([]);
     expect(provider.turn).not.toHaveBeenCalled();
 });
+it('presents fresh evidence intact when the context has room', async () => {
+    const evidence = 'header\n' + 'source evidence '.repeat(220) + '\nunique decision: approve';
+    let turns = 0;
+    const provider = model(async request => {
+        if (!turns++) return reply('', [tool('read_test', {})]);
+        const result = request.messages.find(message => message.role === 'tool_result');
+        expect(result?.content).toBe(evidence);
+        return reply('verified');
+    });
+    const host = await open(provider, undefined, { tools: [{ effect: 'read', definition: { name: 'read_test', description: 'Read evidence', parameters: { type: 'object' } }, validate: args => args, execute: async () => ({ ok: true, content: evidence }) }] });
+    const tree = await host.create('review');
+    await state(host, tree.id, t => expect(t.tasks[t.id].answer).toBe('verified'));
+    const intents = (await host.store.events(tree.id)).filter(event => event.type === 'model.intent');
+    expect(intents).toHaveLength(2);
+});
 it('rejects the whole batch before an earlier valid effect when later arguments are invalid', async () => {
     const execute = vi.fn(async () => ({ ok: true as const, content: 'written' }));
     const validate = vi.fn((args: Record<string, unknown>) => {
@@ -543,10 +558,10 @@ it('recovers referenced evidence from durable history without rerunning the sour
             switch (calls++) {
                 case 0: return reply('', [tool('evidence', {})]);
                 case 1:
-                    expect(request.messages.find(message => message.role === 'tool_result')?.content).toContain('read_tool_result({"callId":"evidence","offset":0})');
+                    expect(request.messages.find(message => message.role === 'tool_result')?.content).toBe(evidence);
                     return reply('', [tool('save_progress', { notes: 'Verify the exact end of the earlier evidence.' })]);
                 case 2:
-                    expect(request.messages.find(message => message.role === 'tool_result')?.content).toContain('read_tool_result({"callId":"evidence","offset":0})');
+                    expect(request.messages.find(message => message.role === 'tool_result')?.content).toBe(evidence);
                     // Grow protected state; the saved source must remain retrievable after it is no longer recent.
                     return reply('', [tool('save_progress', { notes: 'Now recover the saved tail. ' + 'n'.repeat(7000) }, 'progress-again')]);
                 case 3:

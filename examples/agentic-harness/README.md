@@ -240,8 +240,9 @@ policy and only does this under budget pressure when the current task has that
 tool. Full evidence stays intact while it fits; Agentic references lower-priority
 groups first and stops once the request fits. Include
 `read_tool_result` in a delegated child's tools to enable recovery there; grants
-are never added implicitly. The two recent exchanges plus the transient state group stay intact, and context reports
-show exactly which older payloads were shortened.
+are never added implicitly. The two recent exchanges plus the transient state group remain present. If
+protected tool text alone cannot fit, Agentic uses a recoverable head/tail preview.
+Context reports identify every shortened payload and its exact source reference.
 
 `read_tool_result({ messageIndex, offset })` returns up to 8,000 UTF-16 code units
 from the exact original text stored in this task's conversation. Continue with
@@ -250,7 +251,7 @@ files or rerun a tool, and continues to work after restart. Invalid indices and
 out-of-range offsets fail explicitly. Retrieved chunks are not recursively
 replaced with references. This retrieves text, not native media blocks.
 
-The context extension is version 3 for pressure-driven retention; older active compositions
+The context extension is version 10 for pressure-driven retention; older active compositions
 must finish on their matching revision. This does not add semantic summaries,
 search across dropped history or a new memory store. Whole groups can still be
 dropped under the context ceiling, so it is not a guarantee of arbitrary-history
@@ -306,12 +307,10 @@ EOF page; an offset beyond the end is rejected. Runtime version 7 requires the
 original composition for older persisted tasks, as described above.
 
 
-The context composition (version 5) presents recoverable text tool results using
-Agentic's `maxToolResultCharacters: 4000`. Large recent diagnostics receive a
-head/tail preview with an exact `read_tool_result` reference. Raw stored messages
-remain inspectable and retrievable; retrieval responses are not recursively
-shortened. The reference promises the saved tool result, not bytes a source tool
-already discarded. The coding runtime additionally saves large shell output up
+Fresh tool results remain intact while the request fits. Older results may be
+shortened under pressure; raw stored messages remain inspectable and retrievable.
+Retrieval responses are not recursively shortened. A reference promises the saved
+tool result, not bytes a source tool already discarded. The coding runtime additionally saves large shell output up
 to its 8 MiB capture limit and exposes `read_output`; both retrieval tools are
 excluded from recursive presentation. Grant `read_output` alongside `shell_run`
 in coding compositions and keep their output directory with the task data.
@@ -350,9 +349,9 @@ call IDs are rejected. This policy remains under evaluation for retention qualit
 and maintenance overhead.
 
 
-Recoverable tool results have 1,000-character previews by default to leave room
-for checkpoints and recent instructions. The full original remains in the task
-archive and `read_tool_result` pages it without rerunning the tool. Maintenance
+Recoverable tool results retain their full text until context pressure requires
+shortening. The original remains in the task archive and `read_tool_result` pages
+it without rerunning the tool. Maintenance
 fits complete prefixes locally and uses resumable chunks for oversized groups.
 These context and runtime changes bump composition identity; open existing task
 stores with their original composition rather than silently reinterpreting them.
