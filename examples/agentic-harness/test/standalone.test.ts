@@ -1003,3 +1003,46 @@ it.each([false, true])('bounds rejected checkpoint retries and preserves source 
         expect(decisions[1]).toEqual({ accepted: false, reason: 'too_large', attempt: 2 });
     } else expect(saved.tasks[tree.id].checkpointRejection).toBeUndefined();
 });
+
+it('retains a committed checkpoint rejection across reopen without renewing its retry allowance', async () => {
+    const { internalDefinitions } = await import('../src/standalone/tools.js');
+    let calls = 0;
+    const provider = model(async request => {
+        expect(request.system).toContain('Maintain a concise working checkpoint');
+        const input = JSON.parse(request.messages[0].content);
+        expect(input.rejectedDraft).toBe(calls++ ? 'too_large' : undefined);
+        return reply('x'.repeat(8591));
+    });
+    const options = { contextTokens: 2000, outputTokens: 64 };
+    const h = await open(provider, undefined, options);
+    // Pause at the committed rejection boundary, before another worker turn can start.
+    const change = h.store.change.bind(h.store);
+    const stopAtBoundary = vi.spyOn(h.store, 'change').mockImplementation((id, type, update, taskId, data) =>
+        change(id, type, current => {
+            update(current);
+            if (type === 'model.receipt' && taskId && current.tasks[taskId].checkpointRejection)
+                current.tasks[taskId].phase = 'paused';
+        }, taskId, data));
+    const tree = await h.store.create('audit', internalDefinitions.map(t => t.name), h.compositionId);
+    await h.store.change(tree.id, 'fixture.history', current => {
+        current.tasks[tree.id].messages.push(...Array.from({ length: 20 }, (_, index) => ({ role: 'assistant' as const, content: `recorded detail ${index}: ${'evidence '.repeat(28)}` })));
+        current.tasks[tree.id].checkpoint = { through: 1, text: 'Original checkpoint' };
+    });
+    await h.reconcile();
+    await state(h, tree.id, current => expect(current.tasks[tree.id].phase).toBe('paused'));
+    const before = (await h.store.get(tree.id))!;
+    expect(before.tasks[tree.id].checkpointRejection).toBe('too_large');
+    expect(calls).toBe(1);
+    stopAtBoundary.mockRestore();
+    await h.close(); hosts.splice(hosts.indexOf(h), 1);
+    const reopened = await open(provider, h.options.dataDir, options);
+    expect((await reopened.store.get(tree.id))!.tasks[tree.id].checkpointRejection).toBe('too_large');
+    await reopened.send(tree.id, tree.id, 'Continue');
+    await state(reopened, tree.id, current => expect(current.tasks[tree.id].phase).toBe('failed'));
+    const after = (await reopened.store.get(tree.id))!;
+    expect(calls).toBe(2);
+    expect(after.tasks[tree.id].checkpoint).toEqual(before.tasks[tree.id].checkpoint);
+    expect(after.tasks[tree.id].messages.slice(0, before.tasks[tree.id].messages.length)).toEqual(before.tasks[tree.id].messages);
+    expect(after.tasks[tree.id].error).toContain('after two attempts');
+    expect(after.modelCalls).toBe(2);
+});
