@@ -1139,3 +1139,42 @@ it('admits a fitting persisted checkpoint candidate without maintenance in the q
     expect(receipts).toHaveLength(1);
     expect(receipts[0].data).toHaveProperty('contextDecision.accepted', true);
 });
+
+it('uses structured checkpoint formats without tool dispatch and restores their state after reopening', async () => {
+    const context = { ...budgetedContext('', 3000), lifecycle: checkpointContextLifecycle({ maxTokens: 64, triggerRatio: 0.8, format: {
+        instructions: 'Return checkpoint_state with remaining work.',
+        tools: [{ name: 'checkpoint_state', description: '', parameters: { type: 'object' as const, properties: { remaining: { type: 'string' as const } }, required: ['remaining'], additionalProperties: false } }],
+        decode(response) {
+            const calls = response.message.toolCalls ?? [];
+            return calls.length === 1 && calls[0].name === 'checkpoint_state' && typeof calls[0].args.remaining === 'string'
+                ? { ok: true, text: JSON.stringify(calls[0].args) } : { ok: false, reason: 'invalid_format' };
+        },
+    } }) };
+    const provider = model(async request => {
+        if (request.tools?.some(tool => tool.name === 'checkpoint_state'))
+            return reply('', [tool('checkpoint_state', { remaining: 'Security verification.' }, 'derived-state')]);
+        expect(request.messages.some(message => message.content.includes('"remaining":"Security verification."'))).toBe(true);
+        expect(request.messages.some(message => message.content === 'Do not release before security verification.')).toBe(true);
+        return reply('Security verification remains unfinished.');
+    });
+    const options = { context, composition: 'structured-checkpoint-test', outputTokens: 64 };
+    const host = await open(provider, undefined, options);
+    const tree = await host.store.create('Do not release before security verification.', [], host.compositionId);
+    await host.store.change(tree.id, 'fixture.history', current => {
+        current.tasks[tree.id].messages.push(...Array.from({ length: 40 }, (_, i) => ({ role: 'assistant' as const, content: `Evidence ${i}: ${'detail '.repeat(45)}` })));
+    });
+    const original = structuredClone((await host.store.get(tree.id))!.tasks[tree.id].messages);
+    await host.reconcile();
+    await state(host, tree.id, current => expect(current.tasks[tree.id].phase).toBe('completed'));
+    const saved = (await host.store.get(tree.id))!;
+    expect(JSON.parse(contextState(saved.tasks[tree.id]).checkpoint!.text)).toEqual({ remaining: 'Security verification.' });
+    expect(saved.tasks[tree.id].messages.slice(0, original.length)).toEqual(original);
+    expect(saved.tasks[tree.id].messages.some(message => message.role === 'assistant' && message.toolCalls?.some(call => call.name === 'checkpoint_state'))).toBe(false);
+    const events = await host.store.events(tree.id);
+    expect(events.some(event => event.type === 'tool.intent')).toBe(false);
+    expect(events.filter(event => event.type === 'model.receipt')).toHaveLength(2);
+    expect(saved.modelCalls).toBe(2);
+    await host.close(); hosts.splice(hosts.indexOf(host), 1);
+    const reopened = await open(provider, host.options.dataDir, options);
+    expect(contextState((await reopened.store.get(tree.id))!.tasks[tree.id])).toEqual(contextState(saved.tasks[tree.id]));
+});
