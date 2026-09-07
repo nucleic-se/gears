@@ -2,7 +2,7 @@ import type { Kysely } from 'kysely';
 import { randomUUID } from 'node:crypto';
 import { boot, Container, type IQueue } from '@nucleic-se/gears';
 import { DatabaseServiceProvider } from '@nucleic-se/gears/database';
-import { validateOperationResolution, type OperationResolution, projectInstructionText, type ProjectInstruction, toToolResultMessage, checkpointView, prepareCheckpoint, checkpointFromResponse, rejectedCheckpoint, prepareCheckpointRepair, createHarness, inspectHarness, createHarnessExecution, compositionFingerprint, budgetedContext, type ContextStrategy, type HarnessExecution, type HarnessExecutionRoles, type HarnessExtension } from '@nucleic-se/agentic/harness';
+import { archivedToolResultReference, validateOperationResolution, type OperationResolution, projectInstructionText, type ProjectInstruction, toToolResultMessage, checkpointView, prepareCheckpoint, checkpointFromResponse, rejectedCheckpoint, prepareCheckpointRepair, createHarness, inspectHarness, createHarnessExecution, compositionFingerprint, budgetedContext, type ContextStrategy, type HarnessExecution, type HarnessExecutionRoles, type HarnessExtension } from '@nucleic-se/agentic/harness';
 import { executionSignal } from '@nucleic-se/agentic/runtime';
 import type { ILLMProvider, ToolCall } from '@nucleic-se/agentic/llm';
 import type { IValidatedToolRuntime, ToolCallResult } from '@nucleic-se/agentic/tool-runtime';
@@ -66,8 +66,7 @@ export class StandaloneHarness {
                 { id: 'context.gears', version: '15', apiVersion: 1, configuration: JSON.stringify({ tokens: options.contextTokens ?? 16000, custom: options.context ? options.composition : undefined }), roles: { context: () => options.context ?? budgetedContext('', options.contextTokens ?? 16000, {
                     includeToolCallIds: (options.tools ?? []).some(tool => tool.definition.name === 'memory_save'),
                     minRecentGroups: 3, // Two recent exchanges plus the transient state message.
-                    referenceToolResult: (message, index, tools) => !['read_tool_result', 'read_output'].includes(message.toolName ?? '') && tools.some(tool => tool.name === 'read_tool_result')
-                        ? `read_tool_result(${JSON.stringify({ callId: message.toolCallId, offset: 0 })})` : null,
+                    referenceToolResult: archivedToolResultReference,
                 }) } },
                 ...options.extensions ?? [],
             ],
