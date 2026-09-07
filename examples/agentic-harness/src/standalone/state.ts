@@ -103,7 +103,7 @@ export class TreeStore implements ExecutionJournal<Tree, TreeEvent> {
                 throw new Error('Limits must be positive integers');
         if (resolved.children > 32 || resolved.depth > 5 || resolved.modelCalls > 1000 || resolved.expiresAt <= now)
             throw new Error('Limits exceed supported bounds');
-        const tree: Tree = { id, revision: 0, ownerEpoch: this.epoch, createdAt: now, updatedAt: now, tasks: { [id]: newTask(id, objective, tools) },
+        const tree: Tree = { id, revision: 0, ownerEpoch: this.epoch, createdAt: now, updatedAt: now, tasks: { [id]: newTask(id, objective, tools, { maxCalls: resolved.modelCalls }) },
             limits: resolved, chargedTokens: 0, modelCalls: 0, usage: { inputTokens: 0, outputTokens: 0 }, artifacts: {}, composition };
         await this.db.insertInto('harness_trees').values({ id, revision: 0, state: JSON.stringify(tree), active: 1 }).execute();
         return tree;

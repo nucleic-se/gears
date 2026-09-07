@@ -1178,3 +1178,26 @@ it('uses structured checkpoint formats without tool dispatch and restores their 
     const reopened = await open(provider, host.options.dataDir, options);
     expect(contextState((await reopened.store.get(tree.id))!.tasks[tree.id])).toEqual(contextState(saved.tasks[tree.id]));
 });
+
+it('uses the configured root allowance across continuation and reopen without resetting shared usage', async () => {
+    let calls = 0;
+    const provider = model(async () => ++calls <= 30
+        ? reply('', [tool('save_progress', { notes: `Step ${calls} inspected.` }, `progress-${calls}`)])
+        : reply('Review stage complete.'));
+    const options = { checkpointing: false, contextTokens: 64000 };
+    const first = await open(provider, undefined, options);
+    const tree = await first.create('Review in stages.', { modelCalls: 32, tokens: 1000000 });
+    expect(tree.tasks[tree.id].maxCalls).toBe(32);
+    await state(first, tree.id, current => expect(current.tasks[tree.id].phase).toBe('completed'));
+    expect(calls).toBe(31);
+    await first.close(); hosts.splice(hosts.indexOf(first), 1);
+    const reopened = await open(provider, first.options.dataDir, options);
+    await reopened.send(tree.id, tree.id, 'Continue the review.');
+    await state(reopened, tree.id, current => expect(current.tasks[tree.id].phase).toBe('completed'));
+    expect(calls).toBe(32);
+    expect((await reopened.store.get(tree.id))!.modelCalls).toBe(32);
+    await reopened.send(tree.id, tree.id, 'Another stage.');
+    await state(reopened, tree.id, current => expect(current.tasks[tree.id].phase).toBe('failed'));
+    expect((await reopened.store.get(tree.id))!.tasks[tree.id].error).toBe('Shared model-call budget exhausted');
+    expect(calls).toBe(32);
+});

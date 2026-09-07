@@ -42,6 +42,8 @@ Do not set `GEARS_APP_DB_PATH`: this harness uses its own data directory.
 - Tool-using model loop with durable sessions, model intents, receipts and usage.
 - Subagents with separate conversations, explicit context, restricted tool subsets,
   bounded depth/count and individual call limits under a shared tree budget.
+- The root task uses the configured shared model-call allowance. Continuation
+  and reopening preserve usage; child tasks retain their individual call limits.
 - Parent/child messaging, waiting for child results, and cascading cancellation.
 - Self-scheduled continuation: save state, release the worker, resume at a future
   time. Repeated wakes remain bounded by task expiry and shared budgets.
