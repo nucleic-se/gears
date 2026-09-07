@@ -337,6 +337,11 @@ intent/receipt journal and consumes the same task and shared call/token budgets.
 Intent events identify `purpose: checkpoint` and the source range; subsequent
 prepared requests show the exact checkpoint the task model received.
 
+Summary input includes the original visible evidence but excludes opaque provider
+continuation annotations. The archive and recent active messages retain those
+annotations for replay. Source chunk offsets address the projected evidence JSON;
+the context composition version prevents resuming older offsets under this format.
+
 Only a complete, nonempty, bounded text response commits the checkpoint. A partial
 or failed response preserves the prior checkpoint, notes and source history and
 stops the task with a diagnostic. Successful checkpoints reconcile and replace
