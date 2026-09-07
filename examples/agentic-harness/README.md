@@ -327,8 +327,11 @@ The `runtime.gears` extension is now version `8`. Existing trees retain their co
 
 ## Experimental working checkpoints
 
-The host can summarize an outgoing history prefix before context selection drops
-it. The checkpoint is ordinary text plus a source cursor, while `Task.messages`
+The host summarizes an older history prefix when budget pressure shortens or drops
+unprotected groups. Agentic reports that pressure independently of the final fitted
+size, so recoverable previews do not indefinitely postpone maintenance. The protected
+recent tail stays in context; optional presentation caps alone do not trigger a
+checkpoint. The checkpoint is ordinary text plus a source cursor, while `Task.messages`
 retains the complete source history. Each checkpoint call uses the normal model
 intent/receipt journal and consumes the same task and shared call/token budgets.
 Intent events identify `purpose: checkpoint` and the source range; subsequent

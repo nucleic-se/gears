@@ -18,7 +18,7 @@ export interface HarnessOptions {
     concurrency?: number;
     contextTokens?: number;
     outputTokens?: number;
-    /** Maintain a working checkpoint before dropping history. Default: true. */
+    /** Maintain a working checkpoint when budget pressure shortens older history. Default: true. */
     checkpointing?: boolean;
     /** Maximum duration of context preparation and one provider call. Default: five minutes. */
     modelTimeoutMs?: number;
@@ -62,7 +62,7 @@ export class StandaloneHarness {
             extensions: [
                 { id: 'runtime.gears', version: '13', apiVersion: 1, configuration: JSON.stringify({ checkpointing: options.checkpointing ?? true, modelTimeoutMs, outputTokens: options.outputTokens ?? 1800, tools: (options.tools ?? []).map(tool => ({ definition: tool.definition, effect: tool.effect })) }), roles: { runtime: () => StandaloneHarness.openRuntime(options) } },
                 { id: 'provider.gears', version: '1', apiVersion: 1, roles: { provider: () => options.provider } },
-                { id: 'context.gears', version: '10', apiVersion: 1, configuration: JSON.stringify({ tokens: options.contextTokens ?? 16000, custom: options.context ? options.composition : undefined }), roles: { context: () => options.context ?? budgetedContext('', options.contextTokens ?? 16000, {
+                { id: 'context.gears', version: '11', apiVersion: 1, configuration: JSON.stringify({ tokens: options.contextTokens ?? 16000, custom: options.context ? options.composition : undefined }), roles: { context: () => options.context ?? budgetedContext('', options.contextTokens ?? 16000, {
                     minRecentGroups: 3, // Two recent exchanges plus the transient state message.
                     referenceToolResult: (message, index, tools) => !['read_tool_result', 'read_output'].includes(message.toolName ?? '') && tools.some(tool => tool.name === 'read_tool_result')
                         ? `read_tool_result(${JSON.stringify({ callId: message.toolCallId, offset: 0 })})` : null,
