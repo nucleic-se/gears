@@ -2,7 +2,7 @@ import type { Kysely } from 'kysely';
 import { randomUUID } from 'node:crypto';
 import { boot, Container, type IQueue } from '@nucleic-se/gears';
 import { DatabaseServiceProvider } from '@nucleic-se/gears/database';
-import { validateOperationResolution, type OperationResolution, projectInstructionText, type ProjectInstruction, toToolResultMessage, checkpointView, prepareCheckpoint, createHarness, inspectHarness, createHarnessExecution, compositionFingerprint, budgetedContext, type ContextStrategy, type HarnessExecution, type HarnessExecutionRoles, type HarnessExtension } from '@nucleic-se/agentic/harness';
+import { validateOperationResolution, type OperationResolution, projectInstructionText, type ProjectInstruction, toToolResultMessage, checkpointView, prepareCheckpoint, checkpointFromResponse, createHarness, inspectHarness, createHarnessExecution, compositionFingerprint, budgetedContext, type ContextStrategy, type HarnessExecution, type HarnessExecutionRoles, type HarnessExtension } from '@nucleic-se/agentic/harness';
 import { executionSignal } from '@nucleic-se/agentic/runtime';
 import type { ILLMProvider, ToolCall } from '@nucleic-se/agentic/llm';
 import type { IValidatedToolRuntime, ToolCallResult } from '@nucleic-se/agentic/tool-runtime';
@@ -61,9 +61,9 @@ export class StandaloneHarness {
         if (options.context && !options.composition) throw new Error('Custom context requires an explicit composition identity');
         return createHarness().compose({
             extensions: [
-                { id: 'runtime.gears', version: '18', apiVersion: 1, configuration: JSON.stringify({ projectInstructions: options.projectInstructions ?? [], checkpointing: options.checkpointing ?? true, modelTimeoutMs, outputTokens: options.outputTokens ?? 1800, tools: (options.tools ?? []).map(tool => ({ definition: tool.definition, effect: tool.effect })) }), roles: { runtime: () => StandaloneHarness.openRuntime(options) } },
+                { id: 'runtime.gears', version: '19', apiVersion: 1, configuration: JSON.stringify({ projectInstructions: options.projectInstructions ?? [], checkpointing: options.checkpointing ?? true, modelTimeoutMs, outputTokens: options.outputTokens ?? 1800, tools: (options.tools ?? []).map(tool => ({ definition: tool.definition, effect: tool.effect })) }), roles: { runtime: () => StandaloneHarness.openRuntime(options) } },
                 { id: 'provider.gears', version: '1', apiVersion: 1, roles: { provider: () => options.provider } },
-                { id: 'context.gears', version: '14', apiVersion: 1, configuration: JSON.stringify({ tokens: options.contextTokens ?? 16000, custom: options.context ? options.composition : undefined }), roles: { context: () => options.context ?? budgetedContext('', options.contextTokens ?? 16000, {
+                { id: 'context.gears', version: '15', apiVersion: 1, configuration: JSON.stringify({ tokens: options.contextTokens ?? 16000, custom: options.context ? options.composition : undefined }), roles: { context: () => options.context ?? budgetedContext('', options.contextTokens ?? 16000, {
                     includeToolCallIds: (options.tools ?? []).some(tool => tool.definition.name === 'memory_save'),
                     minRecentGroups: 3, // Two recent exchanges plus the transient state message.
                     referenceToolResult: (message, index, tools) => !['read_tool_result', 'read_output'].includes(message.toolName ?? '') && tools.some(tool => tool.name === 'read_tool_result')
@@ -407,7 +407,7 @@ export class StandaloneHarness {
         const taskReport = prepared.report;
         const checkpoint = this.options.checkpointing !== false && taskReport
             ? await prepareCheckpoint(this.execution, messages, view, taskReport, {
-                previous: task.checkpoint, notes: task.notes, maxTokens: Math.min(outputTokens, 800), triggerRatio: 0.8,
+                previous: task.checkpoint, rejection: task.checkpointRejection, notes: task.notes, maxTokens: Math.min(outputTokens, 800), triggerRatio: 0.8,
                 cacheScope: `${this.compositionId}:${task.id}:checkpoint`,
             }, { signal, deadline }) : undefined;
         if (checkpoint) prepared = checkpoint.prepared;
@@ -442,6 +442,8 @@ export class StandaloneHarness {
                 }, task.id, { intent, context: contextReport, deadline, modelTimeoutMs: this.options.modelTimeoutMs, purpose: checkpoint ? 'checkpoint' : 'task', ...(checkpoint ? { sourceRange: checkpoint.sourceRange } : {}) });
             },
             onOutcome: async (receipt) => {
+                const draft = checkpoint && receipt.outcome === 'completed'
+                    ? checkpointFromResponse(checkpoint, receipt.response) : undefined;
                 await this.assertLease();
                 await this.store.change(tree.id, 'model.receipt', current => {
                     const now = current.tasks[task.id];
@@ -467,14 +469,17 @@ export class StandaloneHarness {
                         now.error = 'failure' in receipt ? receipt.failure.message : 'Model output was incomplete';
                     }
                     else if (checkpoint) {
-                        const text = receipt.response.message.content.trim();
-                        if (!text || text.length > 8000 || receipt.response.message.toolCalls?.length) {
-                            now.phase = 'failed';
-                            now.error = 'Checkpoint must be nonempty bounded text without tool calls';
-                        } else {
-                            now.checkpoint = { through: checkpoint.through, text, ...(checkpoint.partial ? { partial: checkpoint.partial } : {}) };
-                            now.notes = ''; // These notes were incorporated into the checkpoint input.
+                        if (draft?.ok) {
+                            now.checkpoint = draft.checkpoint;
+                            delete now.checkpointRejection;
+                            now.notes = ''; // Incorporated into the accepted checkpoint input.
                             now.phase = 'ready';
+                        } else if (draft && !draft.ok) {
+                            // Derived state can be regenerated; original history and prior state stay intact.
+                            const exhausted = now.checkpointRejection !== undefined;
+                            now.checkpointRejection = draft.reason;
+                            now.phase = exhausted ? 'failed' : 'ready';
+                            if (exhausted) now.error = `Checkpoint rejected after two attempts: ${draft.reason}`;
                         }
                     }
                     else {
@@ -494,7 +499,7 @@ export class StandaloneHarness {
                         }
                     }
                     now.generation++;
-                }, task.id, receipt);
+                }, task.id, draft ? { ...receipt, checkpointDecision: draft.ok ? { accepted: true } : { accepted: false, reason: draft.reason, attempt: task.checkpointRejection ? 2 : 1 } } : receipt);
             },
         });
     }

@@ -962,3 +962,44 @@ it.each([false, true])('continues a persisted partial source checkpoint atomical
     const intents = (await reopened.store.events(tree.id, 0)).filter(e => e.type === 'model.intent');
     expect(JSON.stringify(intents)).toContain('endOffset');
 });
+
+it.each([false, true])('bounds rejected checkpoint retries and preserves source history (always reject=%s)', async alwaysReject => {
+    const { internalDefinitions } = await import('../src/standalone/tools.js');
+    let rejected = false;
+    let retries = 0;
+    const h = await open(model(async request => {
+        if (!request.system?.startsWith('Maintain a concise working checkpoint')) return reply('done');
+        const evidence = JSON.parse(request.messages[0].content);
+        expect(evidence.output.maxCharacters).toBe(8000);
+        if (evidence.rejectedDraft) {
+            expect(evidence.rejectedDraft).toBe('too_large');
+            retries++;
+        }
+        if (!rejected || alwaysReject) { rejected = true; return reply('x'.repeat(8591)); }
+        return reply('Inspections recorded. Verification remains unfinished.');
+    }), undefined, { contextTokens: 2000, outputTokens: 64 });
+    const tree = await h.store.create('audit', internalDefinitions.map(t => t.name), h.compositionId);
+    await h.store.change(tree.id, 'fixture.history', current => {
+        const task = current.tasks[tree.id];
+        task.messages.push(...Array.from({ length: 20 }, (_, index) => ({ role: 'assistant' as const, content: `recorded detail ${index}: ${'evidence '.repeat(28)}` })), { role: 'user', content: 'Finish the audit.' });
+        task.checkpoint = { through: 1, text: 'Prior valid checkpoint' };
+        task.notes = 'Verification remains unfinished';
+    });
+    const original = structuredClone((await h.store.get(tree.id))!.tasks[tree.id]);
+    await h.reconcile();
+    await state(h, tree.id, current => expect(current.tasks[tree.id].phase).toBe(alwaysReject ? 'failed' : 'completed'));
+    const saved = (await h.store.get(tree.id))!;
+    expect(retries).toBe(1);
+    expect(saved.tasks[tree.id].messages.slice(0, original.messages.length)).toEqual(original.messages);
+    const events = await h.store.events(tree.id, 0);
+    const decisions = events.filter(e => e.type === 'model.receipt').map(e => (e.data as { checkpointDecision?: { accepted: boolean; attempt?: number } }).checkpointDecision).filter(Boolean);
+    expect(decisions[0]).toEqual({ accepted: false, reason: 'too_large', attempt: 1 });
+    expect(saved.usage.inputTokens).toBe(saved.modelCalls * 100);
+    if (alwaysReject) {
+        expect(saved.modelCalls).toBe(2);
+        expect(saved.tasks[tree.id].checkpoint).toEqual(original.checkpoint);
+        expect(saved.tasks[tree.id].notes).toBe(original.notes);
+        expect(saved.tasks[tree.id].error).toContain('after two attempts');
+        expect(decisions[1]).toEqual({ accepted: false, reason: 'too_large', attempt: 2 });
+    } else expect(saved.tasks[tree.id].checkpointRejection).toBeUndefined();
+});
