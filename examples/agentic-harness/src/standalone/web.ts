@@ -2,6 +2,7 @@ import { createServer, type IncomingMessage } from 'node:http';
 import { timingSafeEqual } from 'node:crypto';
 import { string } from './tools.js';
 import type { StandaloneHarness } from './host.js';
+import type { OperationResolution } from '@nucleic-se/agentic/harness';
 /** Optional UI adapter. Closing a browser does not own or stop agent execution. */
 export async function attachWeb(host: StandaloneHarness, options: {
     token: string;
@@ -58,6 +59,10 @@ export async function attachWeb(host: StandaloneHarness, options: {
                     const body = await json(req);
                     await host.send(id, body.taskId === undefined ? id : string(body.taskId, 100), string(body.message, 8000));
                     result = { ok: true };
+                }
+                else if (req.method === 'POST' && parts[3] === 'resolve' && parts.length === 4) {
+                    const body = await json(req);
+                    result = await host.resolveTool(id, body.taskId === undefined ? id : string(body.taskId, 100), string(body.callId, 1000), body.resolution as OperationResolution);
                 }
                 else {
                     res.writeHead(404);

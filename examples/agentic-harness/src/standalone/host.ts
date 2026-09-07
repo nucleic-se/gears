@@ -2,7 +2,7 @@ import type { Kysely } from 'kysely';
 import { randomUUID } from 'node:crypto';
 import { boot, Container, type IQueue } from '@nucleic-se/gears';
 import { DatabaseServiceProvider } from '@nucleic-se/gears/database';
-import { projectInstructionText, type ProjectInstruction, toToolResultMessage, checkpointView, prepareCheckpoint, createHarness, inspectHarness, createHarnessExecution, compositionFingerprint, budgetedContext, type ContextStrategy, type HarnessExecution, type HarnessExecutionRoles, type HarnessExtension } from '@nucleic-se/agentic/harness';
+import { validateOperationResolution, type OperationResolution, projectInstructionText, type ProjectInstruction, toToolResultMessage, checkpointView, prepareCheckpoint, createHarness, inspectHarness, createHarnessExecution, compositionFingerprint, budgetedContext, type ContextStrategy, type HarnessExecution, type HarnessExecutionRoles, type HarnessExtension } from '@nucleic-se/agentic/harness';
 import { executionSignal } from '@nucleic-se/agentic/runtime';
 import type { ILLMProvider, ToolCall } from '@nucleic-se/agentic/llm';
 import type { IValidatedToolRuntime, ToolCallResult } from '@nucleic-se/agentic/tool-runtime';
@@ -61,7 +61,7 @@ export class StandaloneHarness {
         if (options.context && !options.composition) throw new Error('Custom context requires an explicit composition identity');
         return createHarness().compose({
             extensions: [
-                { id: 'runtime.gears', version: '16', apiVersion: 1, configuration: JSON.stringify({ projectInstructions: options.projectInstructions ?? [], checkpointing: options.checkpointing ?? true, modelTimeoutMs, outputTokens: options.outputTokens ?? 1800, tools: (options.tools ?? []).map(tool => ({ definition: tool.definition, effect: tool.effect })) }), roles: { runtime: () => StandaloneHarness.openRuntime(options) } },
+                { id: 'runtime.gears', version: '17', apiVersion: 1, configuration: JSON.stringify({ projectInstructions: options.projectInstructions ?? [], checkpointing: options.checkpointing ?? true, modelTimeoutMs, outputTokens: options.outputTokens ?? 1800, tools: (options.tools ?? []).map(tool => ({ definition: tool.definition, effect: tool.effect })) }), roles: { runtime: () => StandaloneHarness.openRuntime(options) } },
                 { id: 'provider.gears', version: '1', apiVersion: 1, roles: { provider: () => options.provider } },
                 { id: 'context.gears', version: '13', apiVersion: 1, configuration: JSON.stringify({ tokens: options.contextTokens ?? 16000, custom: options.context ? options.composition : undefined }), roles: { context: () => options.context ?? budgetedContext('', options.contextTokens ?? 16000, {
                     minRecentGroups: 3, // Two recent exchanges plus the transient state message.
@@ -112,7 +112,8 @@ export class StandaloneHarness {
                 const { treeId, taskId } = job.payload;
                 await host.step(treeId, taskId, context.signal);
             });
-            app.singleton('WorkerOptions', () => ({ maxConcurrency: options.concurrency ?? 3, pollInterval: 25, heartbeatIntervalMs: 1000, shutdownTimeoutMs: 10000 }));
+            app.singleton('WorkerOptions', () => ({ maxConcurrency: options.concurrency ?? 3, pollInterval: 25, heartbeatIntervalMs: 1000,
+                recoveryTimeoutMs: TTL, recoveryCheckIntervalMs: 1000, shutdownTimeoutMs: 10000 }));
             // Startup holds the Gears host lease. An interrupted external operation is never replayed.
             const activeTrees = await host.store.list(true);
             for (const tree of activeTrees)
@@ -126,7 +127,7 @@ export class StandaloneHarness {
                         for (const task of Object.values(current.tasks))
                             if (task.phase === 'model' || task.phase === 'external') {
                                 task.phase = 'unknown';
-                                task.error = 'Process stopped during an external operation; inspect receipts before starting new work';
+                                task.error = 'Process stopped during an external operation; inspect receipts before resolving or starting new work';
                                 task.operationId = undefined;
                                 task.generation++;
                             }
@@ -204,12 +205,12 @@ export class StandaloneHarness {
                 if (!task)
                     throw new Error('Unknown task');
                 if (['unknown', 'cancelled', 'failed'].includes(task.phase))
-                    throw new Error('Stopped or unknown execution requires review; create a new task with the evidence');
+                    throw new Error('Stopped or unknown execution requires review; resolve uncertain tool effects or create a new task with the evidence');
                 task.inbox ??= [];
                 if (task.inbox.length >= 16)
                     throw new Error('Inbox full');
                 task.inbox.push({ role: 'user', provenance: 'human', content: message });
-                if (task.phase === 'completed' || task.phase === 'waiting' || task.phase === 'sleeping') {
+                if (task.phase === 'completed' || task.phase === 'waiting' || task.phase === 'sleeping' || task.phase === 'paused') {
                     task.phase = task.pending.length ? 'tools' : 'ready';
                     task.waitFor = undefined;
                     task.wakeAt = undefined;
@@ -217,6 +218,51 @@ export class StandaloneHarness {
                 }
             }, taskId);
             await this.dispatch(tree);
+        });
+    }
+    /** Record a verified external outcome. A separate send resumes the paused task. */
+    resolveTool(treeId: string, taskId: string, callId: string, resolution: OperationResolution) {
+        const input = validateOperationResolution(resolution);
+        return this.admitted(async () => {
+            await this.assertLease();
+            const snapshot = await this.store.get(treeId);
+            if (!snapshot) throw new Error('Unknown task tree');
+            this.validateComposition(snapshot);
+            const check = (tree: Tree, revision: number) => {
+                if (tree.revision !== revision) throw new Error('Tree revision conflict');
+                const task = tree.tasks[taskId];
+                if (this.active.has(taskId)) throw new Error('Wait for the active step to finish before resolving');
+                if (!task || task.phase !== 'unknown' || task.activeTool?.id !== callId) throw new Error('Call is not an unresolved tool effect');
+                if (task.pending.findIndex(call => call.id === callId) > 0) throw new Error('Unresolved call is not at the pending boundary');
+                if ((task.inbox?.length ?? 0) >= 16) throw new Error('Inbox full');
+                return task;
+            };
+            check(snapshot, input.expectedRevision);
+            let expectedRevision = input.expectedRevision;
+            if (snapshot.ownerEpoch !== this.store.epoch) {
+                await this.store.claim(snapshot);
+                expectedRevision++;
+            }
+            return this.store.change(treeId, 'tool.resolved', current => {
+                const task = check(current, expectedRevision), call = task.activeTool!;
+                let sourceIndex = task.messages.length - 1;
+                while (sourceIndex >= 0) {
+                    const message = task.messages[sourceIndex];
+                    if (message.role === 'assistant' && message.toolCalls?.some(item => item.id === callId)) break;
+                    sourceIndex--;
+                }
+                if (sourceIndex < 0) throw new Error('Unresolved call has no source message');
+                const hasReceipt = task.messages.slice(sourceIndex + 1).some(message => message.role === 'tool_result' && message.toolCallId === callId);
+                if (!hasReceipt) task.messages.push(toToolResultMessage(call, input.result));
+                if (task.pending[0]?.id === callId) task.pending.shift();
+                // Keep the original receipt intact. The correction follows the completed batch.
+                task.inbox ??= [];
+                task.inbox.push({ role: 'user', provenance: 'deterministic', content: `Verified tool outcome recorded by the operator:\n${JSON.stringify({ callId, evidence: input.evidence, result: input.result })}` });
+                task.phase = 'paused';
+                delete task.activeTool;
+                delete task.error;
+                task.generation++;
+            }, taskId, { callId, resolution: input });
         });
     }
     cancel(treeId: string, taskId = treeId) {
@@ -465,6 +511,7 @@ export class StandaloneHarness {
                 throw new Error('Tool receipt lost ownership');
             now.messages.push(toToolResultMessage(call, result));
             now.pending.shift();
+            if (!uncertainOutcome) delete now.activeTool;
             if (Date.now() >= current.limits.expiresAt && now.phase !== 'cancelled') {
                 cancelTask(current, task.id);
                 now.error = 'Task expired';
@@ -528,6 +575,7 @@ export class StandaloneHarness {
                         if (now.phase !== 'tools' || now.pending[0]?.id !== call.id)
                             throw new Error('Task changed');
                         now.phase = 'external';
+                        now.activeTool = structuredClone(call);
                     }, task.id, event);
                 }
                 if (event.type === 'tool_end') {

@@ -290,6 +290,51 @@ it('rejects incompatible completed-task continuation before claiming or mutating
     });
     expect(turn).toHaveBeenCalledTimes(2);
 });
+
+it('records an uncertain tool outcome after reopen and resumes only its unexecuted suffix', async () => {
+    const executed: string[] = [];
+    const tools = [{ effect: 'write' as const, definition: { name: 'write_test', description: 'Write test', parameters: { type: 'object' as const } },
+        validate: (args: Record<string, unknown>) => args,
+        execute: async (args: Record<string, unknown>) => {
+            executed.push(args.step as string);
+            return args.step === 'first' ? { ok: false, content: 'Acknowledgement lost', errorKind: 'unknown' as const } : { ok: true, content: 'Second step completed' };
+        } }];
+    const turn = vi.fn(async (request: TurnRequest) => {
+        if (!request.messages.some(message => message.role === 'tool_result'))
+            return reply('', [tool('write_test', { step: 'first' }, 'first'), tool('write_test', { step: 'second' }, 'second')]);
+        expect(request.messages.some(message => message.content.includes('Verified tool outcome recorded'))).toBe(true);
+        return reply('recovered');
+    });
+    const first = await open(model(turn), undefined, { tools }), tree = await first.create('two steps');
+    await state(first, tree.id, current => expect(current.tasks[tree.id].phase).toBe('unknown'));
+    await first.close(); hosts.splice(hosts.indexOf(first), 1);
+    const second = await open(model(turn), first.options.dataDir, { tools });
+    const stopped = (await second.store.get(tree.id))!;
+    const resolution = { expectedRevision: stopped.revision, evidence: 'Inspected the external record: first step completed', result: { ok: true, content: 'First step verified' } };
+    await expect(second.resolveTool(tree.id, tree.id, 'first', { ...resolution, expectedRevision: stopped.revision - 1 })).rejects.toThrow('revision');
+    expect(await second.store.get(tree.id)).toEqual(stopped);
+    const resolved = await second.resolveTool(tree.id, tree.id, 'first', resolution);
+    expect(resolved.tasks[tree.id].phase).toBe('paused');
+    expect(resolved.tasks[tree.id].messages).toEqual(stopped.tasks[tree.id].messages);
+    await second.reconcile();
+    expect(executed).toEqual(['first']);
+    await expect(second.resolveTool(tree.id, tree.id, 'first', { ...resolution, expectedRevision: resolved.revision })).rejects.toThrow('unresolved');
+    await second.send(tree.id, tree.id, 'Continue with the verified outcome');
+    await state(second, tree.id, current => expect(current.tasks[tree.id].answer).toBe('recovered'));
+    expect(executed).toEqual(['first', 'second']);
+    const events = await second.store.events(tree.id);
+    expect(events.find(event => event.type === 'tool.resolved')?.data).toEqual({ callId: 'first', resolution });
+});
+
+it('keeps a live model call beyond the recovery window while worker heartbeats advance', async () => {
+    const turn = vi.fn(async () => {
+        await new Promise(resolve => setTimeout(resolve, 17000));
+        return reply('completed once');
+    });
+    const host = await open(model(turn)), tree = await host.create('wait for a live call');
+    await vi.waitFor(async () => expect((await host.store.get(tree.id))!.tasks[tree.id].answer).toBe('completed once'), { timeout: 22000, interval: 100 });
+    expect(turn).toHaveBeenCalledOnce();
+}, 25000);
 it('preserves cancellation before tool dispatch without marking the outcome unknown', async () => {
     const turn = vi.fn(async () => reply('', [tool('write_test', {})]));
     const execute = vi.fn(async () => ({ ok: true as const, content: 'written' }));

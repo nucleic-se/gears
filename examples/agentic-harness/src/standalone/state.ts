@@ -3,7 +3,7 @@ import { sql, type Kysely } from 'kysely';
 import type { Message, UserMessage, ToolCall, TokenUsage } from '@nucleic-se/agentic/llm';
 import type { WorkingCheckpoint } from '@nucleic-se/agentic/harness';
 import type { ExecutionJournal } from '@nucleic-se/agentic/execution';
-export type Phase = 'ready' | 'model' | 'tools' | 'external' | 'waiting' | 'sleeping' | 'completed' | 'failed' | 'unknown' | 'cancelled';
+export type Phase = 'ready' | 'model' | 'tools' | 'external' | 'waiting' | 'sleeping' | 'paused' | 'completed' | 'failed' | 'unknown' | 'cancelled';
 export interface Task {
     id: string;
     parentId?: string;
@@ -13,6 +13,8 @@ export interface Task {
     messages: Message[];
     inbox?: UserMessage[];
     pending: ToolCall[];
+    /** Set before external tool dispatch; retained until a known receipt or explicit resolution. */
+    activeTool?: ToolCall;
     notes: string;
     checkpoint?: WorkingCheckpoint;
     children: string[];

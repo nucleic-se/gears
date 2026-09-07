@@ -115,6 +115,29 @@ Gears core has no Agentic dependency.
 
 ## Recovery and limits
 
+### Resolving an uncertain tool
+
+Inspect the task's `activeTool` and journal, then independently verify its external
+outcome. Call `host.resolveTool(treeId, taskId, callId, { expectedRevision, evidence,
+result })`, where `result` is a known `ToolCallResult`. The authenticated HTTP
+equivalent is `POST /api/tasks/:id/resolve` with `{ taskId, callId, resolution }`.
+Use the revision from the current inspection snapshot. Stale revisions and
+already-resolved calls are rejected.
+
+Resolution records evidence and leaves the task `paused`. It never reruns the
+uncertain call. Send a separate continuation message to execute the remaining
+pending calls and continue the model. Existing receipts remain intact; a verified
+correction is included in subsequent context. If the process died before any
+receipt, resolution supplies that missing tool result. Unknown model requests
+cannot be resolved through this tool API. There is no resolution form in the UI yet.
+
+Worker recovery uses the host's 15-second lease window with one-second heartbeats.
+This releases a dead queue attempt's concurrency slot after restart; it does not
+impose a 15-second limit on healthy calls. Retry limits remain zero. Runtime
+version 17 requires previous active tasks to use their original composition.
+
+### Execution limits
+
 Safe checkpoints (between model/tool calls, while waiting, and while sleeping)
 resume after restart. A model or external tool that may have executed without a
 receipt is marked `unknown`; it is never silently replayed. Inspect events and
@@ -219,7 +242,7 @@ hits or token-cost savings are not guaranteed. Resource figures are a snapshot
 before request admission, and concurrent children can consume budget afterward.
 Admission still checks the authoritative shared state atomically.
 
-The Gears runtime extension is version 16. The
+The Gears runtime extension is version 17. The
 configured model timeout is included in the composition fingerprint. Active
 trees from earlier compositions require their original revision; new dogfood
 runs use fresh data directories. Existing data is not migrated or deleted.
