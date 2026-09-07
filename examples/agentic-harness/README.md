@@ -219,7 +219,7 @@ hits or token-cost savings are not guaranteed. Resource figures are a snapshot
 before request admission, and concurrent children can consume budget afterward.
 Admission still checks the authoritative shared state atomically.
 
-The Gears runtime extension is version 15. The
+The Gears runtime extension is version 16. The
 configured model timeout is included in the composition fingerprint. Active
 trees from earlier compositions require their original revision; new dogfood
 runs use fresh data directories. Existing data is not migrated or deleted.
@@ -326,6 +326,12 @@ The `runtime.gears` extension is now version `8`. Existing trees retain their co
 
 
 ## Experimental working checkpoints
+
+The CLI loads workspace-root `AGENTS.md` through Agentic's shared instruction
+loader. Embedded hosts can supply scoped `projectInstructions` from that loader.
+The source snapshot is included in task context and composition identity; new
+instruction content requires a new composition. Runtime version 16 adopts this
+behavior. Dynamic discovery of nested scopes during tool use remains unfinished.
 
 Archive retrieval uses Agentic's `readArchivedToolResult` primitive and returns
 both `messageIndex` and `callId` on each text page. Runtime version 15 includes

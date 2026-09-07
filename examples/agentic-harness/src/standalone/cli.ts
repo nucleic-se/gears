@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { resolve } from 'node:path';
 import { SubscriptionProvider } from '@nucleic-se/agentic/providers/subscription';
 import { StandaloneHarness } from './host.js';
+import { readProjectInstructions } from '@nucleic-se/agentic/harness';
 import { workspaceTools } from './tools.js';
 import { attachWeb } from './web.js';
 const args = process.argv.slice(2);
@@ -20,7 +21,7 @@ const hostname = option('--host', '127.0.0.1'), port = Number(option('--port', '
 const model = option('--model', 'gpt-6-astra');
 const modelTimeoutMs = Number(option('--model-timeout-ms', '300000'));
 const host = await StandaloneHarness.open({ dataDir, modelTimeoutMs, provider: new SubscriptionProvider({ model, reasoningEffort: 'low' }),
-    tools: await workspaceTools(workspace), composition: `default-v3:${workspace}:${model}`,
+    tools: await workspaceTools(workspace), projectInstructions: await readProjectInstructions(workspace), composition: `default-v3:${workspace}:${model}`,
     extensions: webEnabled ? [{ id: 'ui.web', version: '1', apiVersion: 1, activate: async client => {
         const web = await attachWeb(client, { token: token!, port, hostname });
         return () => web.close();

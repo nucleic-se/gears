@@ -15,6 +15,20 @@ const reply = (content: string, calls: ToolCall[] = []): TurnResponse => ({ mess
 const tool = (name: string, args: Record<string, unknown>, id = name): ToolCall => ({ id, name, args });
 const model = (turn: ILLMProvider['turn']): ILLMProvider => ({ turn, structured: async () => { throw new Error('unused'); } });
 async function state(host: StandaloneHarness, id: string, check: (t: Tree) => void) { await vi.waitFor(async () => check((await host.store.get(id))!), { timeout: 10000, interval: 20 }); }
+it('snapshots project instructions into the exact task request and composition identity', async () => {
+    const instructions = [{ path: 'AGENTS.md', directory: '.', content: 'Run node --test before completion.' }];
+    const host = await open(model(async request => {
+        expect(request.system).toContain('Source: AGENTS.md');
+        expect(request.system).toContain('Run node --test before completion.');
+        expect(request.system).not.toContain('Changed after opening');
+        return reply('done');
+    }), undefined, { projectInstructions: instructions });
+    instructions[0].content = 'Changed after opening';
+    const tree = await host.create('Fix parser');
+    await state(host, tree.id, current => expect(current.tasks[tree.id].answer).toBe('done'));
+    const other = await open(model(async () => reply('unused')), undefined, { projectInstructions: instructions });
+    expect(other.compositionId).not.toBe(host.compositionId);
+});
 it.each([0, -1, 1.5, NaN, Infinity])('rejects invalid output allowance %s before opening storage', async outputTokens => {
     const path = await mkdtemp(join(tmpdir(), 'invalid-output-')); paths.push(path);
     const provider = model(vi.fn());
