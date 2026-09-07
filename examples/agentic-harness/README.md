@@ -219,7 +219,7 @@ hits or token-cost savings are not guaranteed. Resource figures are a snapshot
 before request admission, and concurrent children can consume budget afterward.
 Admission still checks the authoritative shared state atomically.
 
-The Gears runtime extension is version 13. The
+The Gears runtime extension is version 14. The
 configured model timeout is included in the composition fingerprint. Active
 trees from earlier compositions require their original revision; new dogfood
 runs use fresh data directories. Existing data is not migrated or deleted.
@@ -326,6 +326,11 @@ The `runtime.gears` extension is now version `8`. Existing trees retain their co
 
 
 ## Experimental working checkpoints
+
+The shared checkpoint view retains explicitly pinned user-role instructions and
+the latest human instruction verbatim, even after summarizing their source range.
+These messages retain their source indexes and consume context budget. Runtime
+version 14 requires prior active trees to finish with their original composition.
 
 The host summarizes an older history prefix at 80% of the context strategy's
 reported token ceiling, including output reservation. If a custom context strategy
