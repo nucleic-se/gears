@@ -805,6 +805,42 @@ it.each([false, true])('journals automatic checkpoints atomically (partial=%s)',
     }
 });
 
+it('checkpoints at the reported context threshold before dropping or shortening history', async () => {
+    const { budgetedContext } = await import('@nucleic-se/agentic/harness');
+    const { internalDefinitions } = await import('../src/standalone/tools.js');
+    const context = budgetedContext('', 6000, { minRecentGroups: 3 });
+    let inspected = false, maintenance = 0;
+    const h = await open(model(async request => {
+        if (request.system?.startsWith('Maintain a concise working checkpoint')) {
+            maintenance++;
+            expect(request.messages[0].content).toContain('recorded detail');
+            return reply('Earlier observations preserved. Finish the audit.');
+        }
+        expect(request.messages.some(m => m.content.startsWith('Working checkpoint'))).toBe(true);
+        return reply('done');
+    }), undefined, { contextTokens: 6000, outputTokens: 64, composition: 'early-checkpoint-test', context: {
+        async assemble(messages, signal, options) {
+            const selected = await context.assemble(messages, signal, options);
+            if (!inspected && options?.system?.startsWith('You are a standalone')) {
+                inspected = true;
+                expect(selected.report!.tokenBudget).toBe(6000);
+                expect(selected.report!.usage.totalTokens).toBeGreaterThanOrEqual(4800);
+                expect(selected.report!.decisions.every(d => d.action === 'kept')).toBe(true);
+            }
+            return selected;
+        },
+    } });
+    const tree = await h.store.create('audit', internalDefinitions.map(t => t.name), h.compositionId);
+    await h.store.change(tree.id, 'fixture.history', current => {
+        current.tasks[tree.id].messages.push(...Array.from({ length: 14 }, () => ({ role: 'assistant' as const, content: 'recorded detail'.padEnd(1100, 'x') })));
+    });
+    const original = structuredClone((await h.store.get(tree.id))!.tasks[tree.id].messages);
+    await h.reconcile();
+    await state(h, tree.id, current => expect(current.tasks[tree.id].phase).toBe('completed'));
+    expect(maintenance).toBe(1);
+    expect((await h.store.get(tree.id))!.tasks[tree.id].messages.slice(0, original.length)).toEqual(original);
+});
+
 it('preserves rich tool results in the next request and after reopening', async () => {
     const blocks = [{ type: 'text' as const, text: 'Visible detail' }, { type: 'image' as const, data: 'aGVsbG8=', mimeType: 'image/png' }];
     let calls = 0;
