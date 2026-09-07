@@ -368,11 +368,13 @@ tasks to finish under their original composition.
 
 ## Experimental working checkpoints
 
-The CLI loads workspace-root `AGENTS.md` through Agentic's shared instruction
-loader. Embedded hosts can supply scoped `projectInstructions` from that loader.
+The CLI discovers root and nested `AGENTS.md` through Agentic's shared instruction
+loader, skipping dependency/state directories and directory links. Embedded hosts
+can select narrower scopes and supply `projectInstructions` from that loader.
 The source snapshot is included in task context and composition identity; new
 instruction content requires a new composition. Runtime version 16 adopts this
-behavior. Dynamic discovery of nested scopes during tool use remains unfinished.
+behavior. Discovery happens once at composition startup; instructions are scoped
+by directory and do not hot-reload during a task.
 
 Archive retrieval uses Agentic's `readArchivedToolResult` primitive and returns
 both `messageIndex` and `callId` on each text page. Runtime version 15 includes
