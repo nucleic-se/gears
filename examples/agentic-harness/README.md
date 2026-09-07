@@ -128,10 +128,13 @@ children, then reconcile reported usage. The bundled subscription OAuth transpor
 removes the requested output cap, so its output reservation is a planning allowance.
 Token estimation is not a billing cap:
 a provider can report higher usage, which blocks subsequent admission. Unknown
-requests keep their reservation. Context preparation plus a provider call defaults to a five-minute absolute deadline.
+requests keep their reservation; definitively undispatched requests release it. Invalid
+output allowances are rejected before storage opens. Context preparation plus a provider call defaults to a five-minute absolute deadline.
 Set `modelTimeoutMs` in `HarnessOptions`, or CLI `--model-timeout-ms 300000`.
-The model queue step gets an additional 30 seconds for receipt/cleanup; tools run
-in separate steps with their existing 120-second queue timeout. Both model and
+The model queue step gets an additional 30 seconds for receipt/cleanup. A tool batch
+runs in a separate step with a shared 120-second queue timeout. Agentic validates
+the complete batch before its first effect; each call keeps its own durable intent
+and receipt. This is preflight validation, not a transaction that rolls back effects. Both model and
 tool execution are also cancelled at the tree's expiry, and receipts cannot mark
 expired work completed. Model intents record the effective deadline and configured
 limit. These are absolute deadlines, not progress-sensitive idle timers. Unknown
@@ -216,9 +219,7 @@ hits or token-cost savings are not guaranteed. Resource figures are a snapshot
 before request admission, and concurrent children can consume budget afterward.
 Admission still checks the authoritative shared state atomically.
 
-The Gears runtime extension is version 6 (version 4 fixed UTF-8 reads and admission
-diagnostics; version 5 added timeout policy and separated model/tool steps;
-version 6 preserves ambiguous tool outcomes and validates completed-task continuation). The
+The Gears runtime extension is version 13. The
 configured model timeout is included in the composition fingerprint. Active
 trees from earlier compositions require their original revision; new dogfood
 runs use fresh data directories. Existing data is not migrated or deleted.

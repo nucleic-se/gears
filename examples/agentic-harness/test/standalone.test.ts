@@ -15,6 +15,100 @@ const reply = (content: string, calls: ToolCall[] = []): TurnResponse => ({ mess
 const tool = (name: string, args: Record<string, unknown>, id = name): ToolCall => ({ id, name, args });
 const model = (turn: ILLMProvider['turn']): ILLMProvider => ({ turn, structured: async () => { throw new Error('unused'); } });
 async function state(host: StandaloneHarness, id: string, check: (t: Tree) => void) { await vi.waitFor(async () => check((await host.store.get(id))!), { timeout: 10000, interval: 20 }); }
+it.each([0, -1, 1.5, NaN, Infinity])('rejects invalid output allowance %s before opening storage', async outputTokens => {
+    const path = await mkdtemp(join(tmpdir(), 'invalid-output-')); paths.push(path);
+    const provider = model(vi.fn());
+    await expect(StandaloneHarness.open({ dataDir: path, provider, outputTokens })).rejects.toThrow('outputTokens must be a positive safe integer');
+    const host = await open(provider, path);
+    expect(await host.store.list()).toEqual([]);
+    expect(provider.turn).not.toHaveBeenCalled();
+});
+it('rejects the whole batch before an earlier valid effect when later arguments are invalid', async () => {
+    const execute = vi.fn(async () => ({ ok: true as const, content: 'written' }));
+    const validate = vi.fn((args: Record<string, unknown>) => {
+        if (typeof args.value !== 'string') throw new Error('Expected string');
+        return args;
+    });
+    let turns = 0;
+    const host = await open(model(async () => turns++ ? reply('done') : reply('', [
+        tool('write_test', { value: 'valid' }, 'first'), tool('write_test', { value: 42 }, 'second'),
+    ])), undefined, { tools: [{ effect: 'write', definition: { name: 'write_test', description: 'Write test', parameters: { type: 'object' } }, validate, execute }] });
+    const tree = await host.create('write');
+    await state(host, tree.id, t => expect(t.tasks[t.id].phase).toBe('completed'));
+    const events = await host.store.events(tree.id);
+    const receipts = events.filter(event => event.type === 'tool.receipt');
+    expect(receipts).toHaveLength(2);
+    expect(receipts[0].data).toMatchObject({ execution: { status: 'skipped', dispatched: false } });
+    expect(receipts[1].data).toMatchObject({ execution: { status: 'runtime_failure', dispatched: false } });
+    expect(events.some(event => event.type === 'tool.intent')).toBe(false);
+    expect(validate).toHaveBeenCalledTimes(2);
+    expect(execute).not.toHaveBeenCalled();
+});
+it('enforces the shared per-turn call ceiling before any effect', async () => {
+    const execute = vi.fn(async () => ({ ok: true as const, content: 'written' }));
+    const host = await open(model(async () => reply('', Array.from({ length: 17 }, (_, i) => tool('write_test', {}, String(i))))), undefined,
+        { tools: [{ effect: 'write', definition: { name: 'write_test', description: 'Write test', parameters: { type: 'object' } }, validate: args => args, execute }] });
+    const tree = await host.create('write');
+    await state(host, tree.id, t => {
+        expect(t.tasks[t.id].phase).toBe('failed');
+        expect(t.tasks[t.id].error).toContain('maximum is 16');
+    });
+    expect(execute).not.toHaveBeenCalled();
+});
+it('resumes the unexecuted batch suffix after shutdown without replaying committed effects', async () => {
+    let turns = 0, signal!: AbortSignal, release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const execute = vi.fn(async (_args: Record<string, unknown>, currentSignal: AbortSignal) => {
+        signal = currentSignal; return { ok: true as const, content: 'written' };
+    });
+    const tools = [{ effect: 'write' as const, definition: { name: 'write_test', description: 'Write test', parameters: { type: 'object' as const } }, validate: (args: Record<string, unknown>) => args, execute }];
+    const provider = model(async () => turns++ ? reply('done') : reply('', [tool('write_test', {}, 'first'), tool('write_test', {}, 'second')]));
+    const first = await open(provider, undefined, { tools });
+    const change = first.store.change.bind(first.store);
+    vi.spyOn(first.store, 'change').mockImplementation(async (...args) => {
+        const result = await change(...args);
+        if (args[1] === 'tool.receipt') await gate;
+        return result;
+    });
+    const tree = await first.create('write');
+    await state(first, tree.id, t => expect(t.tasks[t.id].pending.map(call => call.id)).toEqual(['second']));
+    const closing = first.close();
+    try { await vi.waitFor(() => expect(signal.aborted).toBe(true)); }
+    finally { release(); await closing; }
+    hosts.splice(hosts.indexOf(first), 1);
+    const second = await open(provider, first.options.dataDir, { tools });
+    await state(second, tree.id, t => expect(t.tasks[t.id].phase).toBe('completed'));
+    expect(execute).toHaveBeenCalledTimes(2);
+    const results = (await second.store.get(tree.id))!.tasks[tree.id].messages.filter(message => message.role === 'tool_result');
+    expect(results.map(result => result.toolCallId)).toEqual(['first', 'second']);
+    expect(results.every(result => !result.isError)).toBe(true);
+});
+it('refunds the reservation when cancellation occurs after intent and before dispatch', async () => {
+    const provider = model(vi.fn(async () => reply('unused')));
+    const host = await open(provider);
+    const change = host.store.change.bind(host.store);
+    vi.spyOn(host.store, 'change').mockImplementation(async (...args) => {
+        const result = await change(...args);
+        if (args[1] === 'model.intent') await host.cancel(args[0]);
+        return result;
+    });
+    const tree = await host.create('cancel before dispatch');
+    await vi.waitFor(async () => expect((await host.store.events(tree.id)).find(e => e.type === 'model.receipt')?.data).toMatchObject({ dispatched: false }));
+    const current = (await host.store.get(tree.id))!;
+    expect(current.chargedTokens).toBe(0);
+    expect(current.usage).toEqual({ inputTokens: 0, outputTokens: 0 });
+    expect(current.tasks[tree.id].reservation).toBeUndefined();
+    expect(provider.turn).not.toHaveBeenCalled();
+});
+it('keeps the reservation when provider dispatch has an unknown outcome', async () => {
+    const host = await open(model(async () => { throw new Error('Connection lost'); }));
+    const tree = await host.create('unknown dispatch');
+    await state(host, tree.id, t => expect(t.tasks[t.id].phase).toBe('unknown'));
+    const current = (await host.store.get(tree.id))!;
+    expect(current.chargedTokens).toBeGreaterThan(0);
+    expect(current.usage).toEqual({ inputTokens: 0, outputTokens: 0 });
+    expect((await host.store.events(tree.id)).find(e => e.type === 'model.receipt')?.data).toMatchObject({ dispatched: true });
+});
 it('delegates two children, collects results, sleeps without a worker and resumes after reopen', async () => {
     const provider = model(vi.fn(async (request: TurnRequest) => {
         const objective = request.messages[0].content;

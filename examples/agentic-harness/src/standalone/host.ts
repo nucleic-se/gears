@@ -4,7 +4,7 @@ import { boot, Container, type IQueue } from '@nucleic-se/gears';
 import { DatabaseServiceProvider } from '@nucleic-se/gears/database';
 import { toToolResultMessage, checkpointView, prepareCheckpoint, createHarness, inspectHarness, createHarnessExecution, compositionFingerprint, budgetedContext, type ContextStrategy, type HarnessExecution, type HarnessExecutionRoles, type HarnessExtension } from '@nucleic-se/agentic/harness';
 import { executionSignal } from '@nucleic-se/agentic/runtime';
-import type { ILLMProvider } from '@nucleic-se/agentic/llm';
+import type { ILLMProvider, ToolCall } from '@nucleic-se/agentic/llm';
 import type { IValidatedToolRuntime, ToolCallResult } from '@nucleic-se/agentic/tool-runtime';
 import { TreeStore, terminal, type Tree, type Task, type Limits, type HarnessDatabase } from './state.js';
 import { internalDefinitions, validateInternal, internalAction, childResults, cancelTask, type HarnessTool } from './tools.js';
@@ -53,11 +53,14 @@ export class StandaloneHarness {
         const modelTimeoutMs = options.modelTimeoutMs ?? 300000;
         if (!Number.isSafeInteger(modelTimeoutMs) || modelTimeoutMs < 1 || modelTimeoutMs > 2147453647)
             throw new RangeError('modelTimeoutMs must be a positive integer no greater than 2147453647');
-        options = { ...options, modelTimeoutMs };
+        const outputTokens = options.outputTokens ?? 1800;
+        if (!Number.isSafeInteger(outputTokens) || outputTokens < 1)
+            throw new RangeError('outputTokens must be a positive safe integer');
+        options = { ...options, modelTimeoutMs, outputTokens };
         if (options.context && !options.composition) throw new Error('Custom context requires an explicit composition identity');
         return createHarness().compose({
             extensions: [
-                { id: 'runtime.gears', version: '12', apiVersion: 1, configuration: JSON.stringify({ checkpointing: options.checkpointing ?? true, modelTimeoutMs, outputTokens: options.outputTokens ?? 1800, tools: (options.tools ?? []).map(tool => ({ definition: tool.definition, effect: tool.effect })) }), roles: { runtime: () => StandaloneHarness.openRuntime(options) } },
+                { id: 'runtime.gears', version: '13', apiVersion: 1, configuration: JSON.stringify({ checkpointing: options.checkpointing ?? true, modelTimeoutMs, outputTokens: options.outputTokens ?? 1800, tools: (options.tools ?? []).map(tool => ({ definition: tool.definition, effect: tool.effect })) }), roles: { runtime: () => StandaloneHarness.openRuntime(options) } },
                 { id: 'provider.gears', version: '1', apiVersion: 1, roles: { provider: () => options.provider } },
                 { id: 'context.gears', version: '9', apiVersion: 1, configuration: JSON.stringify({ tokens: options.contextTokens ?? 16000, custom: options.context ? options.composition : undefined }), roles: { context: () => options.context ?? budgetedContext('', options.contextTokens ?? 16000, {
                     maxToolResultCharacters: 1000, // Leave room for working memory; full results stay retrievable.
@@ -403,6 +406,8 @@ export class StandaloneHarness {
                         current.usage.inputTokens += receipt.usage.inputTokens;
                         current.usage.outputTokens += receipt.usage.outputTokens;
                     }
+                    if (!receipt.usage && !receipt.dispatched)
+                        current.chargedTokens -= now.reservation ?? 0;
                     now.reservation = undefined;
                     if (Date.now() >= current.limits.expiresAt && now.phase !== 'cancelled') {
                         cancelTask(current, task.id);
@@ -450,11 +455,11 @@ export class StandaloneHarness {
         signal.throwIfAborted();
         if (Date.now() >= tree.limits.expiresAt)
             throw new Error('Task expired');
-        const call = task.pending[0];
-        if (!call)
-            throw new Error('Missing tool call');
-        const internal = internalDefinitions.some(t => t.name === call.name), plugin = this.plugins.get(call.name);
-        const finish = (current: Tree, result: ToolCallResult, uncertainOutcome?: string) => {
+        const calls = task.pending;
+        if (!calls.length)
+            throw new Error('Missing tool calls');
+        const internal = (name: string) => internalDefinitions.some(t => t.name === name);
+        const finish = (current: Tree, call: ToolCall, result: ToolCallResult, uncertainOutcome?: string) => {
             const now = current.tasks[task.id];
             if (now.pending[0]?.id !== call.id)
                 throw new Error('Tool receipt lost ownership');
@@ -474,13 +479,15 @@ export class StandaloneHarness {
                 try {
                     if (!task.tools.includes(name))
                         throw new Error('Tool not granted');
-                    return { ok: true, args: internal ? validateInternal(name, args) : plugin!.validate(args) };
+                    return { ok: true, args: internal(name) ? validateInternal(name, args) : this.plugins.get(name)!.validate(args) };
                 }
                 catch (error) {
                     return { ok: false, result: { ok: false, content: String(error), errorKind: 'validation' } };
                 }
-            }, call: async (name, args) => {
-                if (internal) {
+            }, call: async (name, args, context) => {
+                const call = calls.find(call => call.id === context?.callId);
+                if (!call) throw new Error('Unknown batch call');
+                if (internal(name)) {
                     await this.assertLease();
                     let result!: ToolCallResult;
                     await this.store.change(tree.id, 'tool.receipt', current => {
@@ -498,19 +505,23 @@ export class StandaloneHarness {
                         catch (error) {
                             result = { ok: false, content: String(error), errorKind: 'validation' };
                         }
-                        finish(current, result);
+                        finish(current, call, result);
                     }, task.id, { call });
                     return result;
                 }
+                const plugin = this.plugins.get(name)!;
                 try {
-                    return await plugin!.execute(args, signal);
+                    return await plugin.execute(args, signal);
                 }
                 catch (error) {
-                    return { ok: false, content: String(error), errorKind: plugin!.effect === 'read' ? 'runtime' : 'unknown' };
+                    return { ok: false, content: String(error), errorKind: plugin.effect === 'read' ? 'runtime' : 'unknown' };
                 }
             } };
-        await this.execution.tools([call], { tools: runtime, signal, emit: async (event) => {
-                if (event.type === 'tool_start' && !internal) {
+        await this.execution.tools(calls, { tools: runtime, signal, emit: async (event) => {
+                if (event.type !== 'tool_start' && event.type !== 'tool_end') return;
+                const call = calls.find(call => call.id === event.callId);
+                if (!call) throw new Error('Unknown batch event');
+                if (event.type === 'tool_start' && !internal(call.name)) {
                     await this.assertLease();
                     await this.store.change(tree.id, 'tool.intent', current => {
                         const now = current.tasks[task.id];
@@ -521,14 +532,17 @@ export class StandaloneHarness {
                 }
                 if (event.type === 'tool_end') {
                     const current = (await this.store.get(tree.id))!, now = current.tasks[task.id];
-                    if (now.pending[0]?.id !== call.id)
+                    // Shutdown leaves undispatched calls pending for the next owner.
+                    if (this.closing && !event.execution.dispatched) return;
+                    // Unknown outcomes retain the unexecuted suffix for explicit reconciliation.
+                    if (now.phase === 'unknown' || now.pending[0]?.id !== call.id)
                         return; // Internal action and receipt already committed together.
                     await this.assertLease();
                     const execution = event.execution;
                     // Use Agentic's classified receipt, including whether dispatch actually happened.
                     const uncertainOutcome = execution.dispatched && ['unknown', 'timeout', 'cancelled'].includes(execution.status)
                         ? `Tool '${call.name}' outcome is unknown after dispatch: ${execution.error ?? execution.status}` : undefined;
-                    await this.store.change(tree.id, 'tool.receipt', current => finish(current, execution.result ?? {
+                    await this.store.change(tree.id, 'tool.receipt', current => finish(current, call, execution.result ?? {
                         ok: false, content: execution.error ?? 'Tool rejected', errorKind: 'policy'
                     }, uncertainOutcome), task.id, event);
                 }
