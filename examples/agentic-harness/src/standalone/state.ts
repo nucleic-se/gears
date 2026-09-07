@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { sql, type Kysely } from 'kysely';
 import type { Message, UserMessage, ToolCall, TokenUsage } from '@nucleic-se/agentic/llm';
 import type { ExecutionJournal } from '@nucleic-se/agentic/execution';
+import type { OperationResolution } from '@nucleic-se/agentic/harness';
 export type Phase = 'ready' | 'model' | 'tools' | 'external' | 'waiting' | 'sleeping' | 'paused' | 'completed' | 'failed' | 'unknown' | 'cancelled';
 export interface Task {
     id: string;
@@ -14,6 +15,8 @@ export interface Task {
     pending: ToolCall[];
     /** Set before external tool dispatch; retained until a known receipt or explicit resolution. */
     activeTool?: ToolCall;
+    /** Verified outcomes keyed by original tool-result message index; original receipts stay intact. */
+    resolutions?: Record<number, OperationResolution>;
     notes: string;
     /** Opaque derived state owned by the configured context lifecycle. */
     contextState?: unknown;

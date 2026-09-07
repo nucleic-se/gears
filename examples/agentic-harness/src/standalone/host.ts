@@ -63,7 +63,7 @@ export class StandaloneHarness {
         if (options.context && !options.composition) throw new Error('Custom context requires an explicit composition identity');
         return createHarness().compose({
             extensions: [
-                { id: 'runtime.gears', version: '22', apiVersion: 1, configuration: JSON.stringify({ projectInstructions: options.projectInstructions ?? [], checkpointing: options.checkpointing ?? true, modelTimeoutMs, outputTokens: options.outputTokens ?? 1800, tools: (options.tools ?? []).map(tool => ({ definition: tool.definition, effect: tool.effect })) }), roles: { runtime: () => StandaloneHarness.openRuntime(options) } },
+                { id: 'runtime.gears', version: '23', apiVersion: 1, configuration: JSON.stringify({ projectInstructions: options.projectInstructions ?? [], checkpointing: options.checkpointing ?? true, modelTimeoutMs, outputTokens: options.outputTokens ?? 1800, tools: (options.tools ?? []).map(tool => ({ definition: tool.definition, effect: tool.effect })) }), roles: { runtime: () => StandaloneHarness.openRuntime(options) } },
                 { id: 'provider.gears', version: '1', apiVersion: 1, roles: { provider: () => options.provider } },
                 { id: 'context.gears', version: '19', apiVersion: 1, configuration: JSON.stringify({ tokens: options.contextTokens ?? 16000, custom: options.context ? options.composition : undefined }), roles: { context: () => options.context ?? { ...budgetedContext('', options.contextTokens ?? 16000, {
                     includeToolCallIds: (options.tools ?? []).some(tool => tool.definition.name === 'memory_save'),
@@ -256,6 +256,9 @@ export class StandaloneHarness {
                 if (sourceIndex < 0) throw new Error('Unresolved call has no source message');
                 const hasReceipt = task.messages.slice(sourceIndex + 1).some(message => message.role === 'tool_result' && message.toolCallId === callId);
                 if (!hasReceipt) task.messages.push(toToolResultMessage(call, input.result));
+                const receiptIndex = task.messages.findIndex((message, index) => index > sourceIndex && message.role === 'tool_result' && message.toolCallId === callId);
+                task.resolutions ??= {};
+                task.resolutions[receiptIndex] = input;
                 if (task.pending[0]?.id === callId) task.pending.shift();
                 // Keep the original receipt intact. The correction follows the completed batch.
                 task.inbox ??= [];

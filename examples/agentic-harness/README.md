@@ -457,3 +457,11 @@ to `memory_read`, then follow `nextOffset` until `eof`. Gears resolves the store
 task/message reference; Agentic verifies its fingerprint and returns bounded pages.
 The original tool is never rerun. If the source archive is missing or changed,
 the captured excerpt remains available and source paging reports the problem.
+
+### Operator-resolved source evidence
+
+Tool resolution preserves the original receipt and records the verified outcome
+separately, indexed by its original message position. Memory capture by call ID
+uses that verified outcome and assigns a `/resolution/` source reference. Existing
+`/message/` references continue to mean the original receipt. Both remain durable
+across reopening; source retrieval never repeats the external effect.
