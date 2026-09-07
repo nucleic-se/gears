@@ -325,6 +325,18 @@ The host supplies Agentic's provider-neutral `cacheScope` from the composition a
 The `runtime.gears` extension is now version `8`. Existing trees retain their composition fingerprint and require their original runtime composition to resume. Start a new tree for this composition; no stored history is rewritten.
 
 
+## Coding mode
+
+Pass `--coding` to the CLI to register Agentic's shared coding pack. This explicitly
+grants the root agent file edits and local command execution; delegated children
+can receive only subsets of that manifest. Use it in a workspace where those
+effects are authorized. This mode does not add per-call approval prompts.
+The default CLI remains read-only. The shared pack has eight tools: `fs_read`,
+`fs_list`, `search_grep`, `search_find`, `fs_write`, `fs_patch`, `shell_run`, and
+`read_output`. Saved command output stays under the task data directory.
+The Gears adapter owns no file or shell behavior; validation, execution, output
+capture and effect classification come from Agentic.
+
 ## Experimental working checkpoints
 
 The CLI loads workspace-root `AGENTS.md` through Agentic's shared instruction

@@ -5,6 +5,7 @@ import { StandaloneHarness } from './host.js';
 import { readProjectInstructions } from '@nucleic-se/agentic/harness';
 import { workspaceTools } from './tools.js';
 import { attachWeb } from './web.js';
+import { codingTools } from './coding.js';
 const args = process.argv.slice(2);
 function option(name: string, fallback: string) {
     const index = args.indexOf(name);
@@ -20,15 +21,17 @@ const token = webEnabled ? process.env.GEARS_AGENT_TOKEN ?? randomBytes(24).toSt
 const hostname = option('--host', '127.0.0.1'), port = Number(option('--port', '4318'));
 const model = option('--model', 'gpt-6-astra');
 const modelTimeoutMs = Number(option('--model-timeout-ms', '300000'));
+const coding = args.includes('--coding');
 const host = await StandaloneHarness.open({ dataDir, modelTimeoutMs, provider: new SubscriptionProvider({ model, reasoningEffort: 'low' }),
-    tools: await workspaceTools(workspace), projectInstructions: await readProjectInstructions(workspace), composition: `default-v3:${workspace}:${model}`,
+    tools: coding ? codingTools(workspace, resolve(dataDir, 'outputs')) : await workspaceTools(workspace),
+    projectInstructions: await readProjectInstructions(workspace), composition: `default-v3:${workspace}:${model}`,
     extensions: webEnabled ? [{ id: 'ui.web', version: '1', apiVersion: 1, activate: async client => {
         const web = await attachWeb(client, { token: token!, port, hostname });
         return () => web.close();
     } }] : [],
 });
 try {
-    console.log(JSON.stringify({ type: 'ready', ...(webEnabled ? { url: `http://${hostname}:${port}`, token } : {}), workspace, dataDir }));
+    console.log(JSON.stringify({ type: 'ready', ...(webEnabled ? { url: `http://${hostname}:${port}`, token } : {}), workspace, dataDir, coding }));
     process.send?.({ type: 'ready' });
     process.on('message', async (message: {
         type: string;
