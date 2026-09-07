@@ -973,7 +973,7 @@ it.each([false, true])('bounds rejected checkpoint retries and preserves source 
     const h = await open(model(async request => {
         if (!/^(Maintain a concise working checkpoint|Repair a rejected working checkpoint)/.test(request.system ?? '')) return reply('done');
         const evidence = JSON.parse(request.messages[0].content);
-        expect(evidence.output.maxCharacters).toBe(8000);
+        expect(evidence.output.targetCharacters).toBe(evidence.rejectedDraft ? 4000 : 8000);
         if (evidence.rejectedDraft) {
             expect(evidence.rejectedDraft).toBe('too_large');
             expect(evidence.draft).toBe('x'.repeat(8591));
@@ -998,18 +998,18 @@ it.each([false, true])('bounds rejected checkpoint retries and preserves source 
     expect(saved.tasks[tree.id].messages.slice(0, original.messages.length)).toEqual(original.messages);
     const events = await h.store.events(tree.id, 0);
     const decisions = events.filter(e => e.type === 'model.receipt').map(e => (e.data as { contextDecision?: { accepted: boolean; attempt?: number } }).contextDecision).filter(Boolean);
-    expect(decisions[0]).toEqual({ accepted: false, reason: 'too_large', attempt: 1 });
+    expect(decisions[0]).toEqual({ pending: true, attempt: 1 });
     expect(saved.usage.inputTokens).toBe(saved.modelCalls * 100);
     if (alwaysReject) {
         expect(saved.modelCalls).toBe(2);
         expect(contextState(saved.tasks[tree.id]).checkpoint).toEqual(contextState(original).checkpoint);
         expect(saved.tasks[tree.id].notes).toBe(original.notes);
         expect(saved.tasks[tree.id].error).toContain('after two attempts');
-        expect(decisions[1]).toEqual({ accepted: false, reason: 'too_large', attempt: 2 });
+        expect(decisions[1]).toEqual({ pending: true, attempt: 2 });
     } else expect(contextState(saved.tasks[tree.id]).rejected).toBeUndefined();
 });
 
-it('retains a committed checkpoint rejection across reopen without renewing its retry allowance', async () => {
+it('retains a complete checkpoint candidate across reopen without renewing its retry allowance', async () => {
     const { internalDefinitions } = await import('../src/standalone/tools.js');
     let calls = 0;
     const provider = model(async request => {
@@ -1021,12 +1021,12 @@ it('retains a committed checkpoint rejection across reopen without renewing its 
     });
     const options = { contextTokens: 3000, outputTokens: 64 };
     const h = await open(provider, undefined, options);
-    // Pause at the committed rejection boundary, before another worker turn can start.
+    // Pause at the committed candidate boundary, before another worker turn can start.
     const change = h.store.change.bind(h.store);
     const stopAtBoundary = vi.spyOn(h.store, 'change').mockImplementation((id, type, update, taskId, data) =>
         change(id, type, current => {
             update(current);
-            if (type === 'model.receipt' && taskId && contextState(current.tasks[taskId]).rejected)
+            if (type === 'model.receipt' && taskId && contextState(current.tasks[taskId]).candidate)
                 current.tasks[taskId].phase = 'paused';
         }, taskId, data));
     const tree = await h.store.create('audit', internalDefinitions.map(t => t.name), h.compositionId);
@@ -1037,12 +1037,12 @@ it('retains a committed checkpoint rejection across reopen without renewing its 
     await h.reconcile();
     await state(h, tree.id, current => expect(current.tasks[tree.id].phase).toBe('paused'));
     const before = (await h.store.get(tree.id))!;
-    expect(contextState(before.tasks[tree.id]).rejected?.reason).toBe('too_large');
+    expect(contextState(before.tasks[tree.id]).candidate).toMatchObject({ text: 'x'.repeat(8591), attempt: 1 });
     expect(calls).toBe(1);
     stopAtBoundary.mockRestore();
     await h.close(); hosts.splice(hosts.indexOf(h), 1);
     const reopened = await open(provider, h.options.dataDir, options);
-    expect(contextState((await reopened.store.get(tree.id))!.tasks[tree.id]).rejected?.reason).toBe('too_large');
+    expect(contextState((await reopened.store.get(tree.id))!.tasks[tree.id]).candidate).toEqual(contextState(before.tasks[tree.id]).candidate);
     await reopened.send(tree.id, tree.id, 'Continue');
     await state(reopened, tree.id, current => expect(current.tasks[tree.id].phase).toBe('failed'));
     const after = (await reopened.store.get(tree.id))!;
@@ -1101,4 +1101,41 @@ it('records the charged provider receipt when a context reducer fails', async ()
     expect(saved.chargedTokens).toBe(120);
     expect(saved.tasks[tree.id].contextState).toBeUndefined();
     expect((await h.store.events(tree.id, 0)).some(e => e.type === 'model.receipt')).toBe(true);
+});
+
+it('admits a fitting persisted checkpoint candidate without maintenance in the queued host', async () => {
+    const { internalDefinitions } = await import('../src/standalone/tools.js');
+    const draft = 'Verified observation. '.repeat(450);
+    let calls = 0;
+    const provider = model(async request => {
+        calls++;
+        expect(request.system).not.toMatch(/^(Maintain|Repair)/);
+        expect(request.messages.some(m => m.content.endsWith(draft.trim()))).toBe(true);
+        expect(request.messages.some(m => m.content === 'Keep the original task intent.')).toBe(true);
+        return reply('done');
+    });
+    const options = { contextTokens: 16000, outputTokens: 64 };
+    const h = await open(provider, undefined, options);
+    const tree = await h.store.create('Keep the original task intent.', internalDefinitions.map(t => t.name), h.compositionId);
+    await h.store.change(tree.id, 'fixture.candidate', current => {
+        const task = current.tasks[tree.id];
+        task.messages.push({ role: 'assistant', content: 'Original source evidence.' });
+        task.contextState = { kind: 'checkpoint', checkpoint: { through: 1, text: 'Prior evidence.' }, candidate: {
+            through: task.messages.length, text: draft.trim(), sourceRange: { start: 1, end: task.messages.length }, attempt: 1,
+        } };
+    });
+    const original = (await h.store.get(tree.id))!.tasks[tree.id].messages;
+    await h.close(); hosts.splice(hosts.indexOf(h), 1);
+    const reopened = await open(provider, h.options.dataDir, options);
+    await reopened.reconcile();
+    await state(reopened, tree.id, current => expect(current.tasks[tree.id].phase).toBe('completed'));
+    const saved = (await reopened.store.get(tree.id))!;
+    expect(calls).toBe(1);
+    expect(saved.usage.inputTokens).toBe(100);
+    expect(contextState(saved.tasks[tree.id]).checkpoint?.text).toBe(draft.trim());
+    expect(contextState(saved.tasks[tree.id]).candidate).toBeUndefined();
+    expect(saved.tasks[tree.id].messages.slice(0, original.length)).toEqual(original);
+    const receipts = (await reopened.store.events(tree.id)).filter(e => e.type === 'model.receipt');
+    expect(receipts).toHaveLength(1);
+    expect(receipts[0].data).toHaveProperty('contextDecision.accepted', true);
 });
