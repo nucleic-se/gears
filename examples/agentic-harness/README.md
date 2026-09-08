@@ -485,3 +485,25 @@ separately, indexed by its original message position. Memory capture by call ID
 uses that verified outcome and assigns a `/resolution/` source reference. Existing
 `/message/` references continue to mean the original receipt. Both remain durable
 across reopening; source retrieval never repeats the external effect.
+
+
+### Model input and result recovery
+
+Internal tool schemas and validation share one definition, including size limits,
+artifact names and paired archive references. The model sees task expiry and
+remaining delegation capacity when it has those capabilities. `schedule_self`
+releases the worker; call `save_progress` separately to update durable notes.
+
+Child completion previews share an 8000-character allowance and include explicit
+pagination. Use `wait_agents` with one direct child ID and the returned `nextOffset`
+to recover the complete answer. Saved answers remain unchanged. Archive access uses
+Agentic's shared contract and is scoped to the calling task's original receipts.
+
+The CLI refreshes project instructions before each model request, supplying root
+instructions, relevant nested scopes and a catalog of other instruction paths.
+Custom hosts may supply a fixed instruction snapshot or an async renderer receiving
+messages and an abort signal. Dynamic renderers require an explicit composition ID.
+Prepared requests retain the exact rendered instructions for inspection.
+
+The runtime and context composition revisions changed. Open old active task trees
+with their original composition, or use a fresh data directory for this revision.

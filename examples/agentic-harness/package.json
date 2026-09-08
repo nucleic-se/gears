@@ -14,7 +14,8 @@
     "@earendil-works/pi-ai": "0.85.1",
     "@nucleic-se/agentic": "file:../../../agentic",
     "@nucleic-se/gears": "file:../..",
-    "kysely": "^0.28.17"
+    "kysely": "^0.28.17",
+    "zod": "^4.5.4"
   },
   "devDependencies": {
     "@types/node": "^25.0.9",

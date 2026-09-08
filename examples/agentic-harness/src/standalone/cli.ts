@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { resolve } from 'node:path';
 import { SubscriptionProvider } from '@nucleic-se/agentic/providers/subscription';
 import { StandaloneHarness } from './host.js';
-import { readProjectInstructions } from '@nucleic-se/agentic/harness';
+import { readProjectInstructions, projectInstructionText, projectInstructionTargets } from '@nucleic-se/agentic/harness';
 import { attachWeb } from './web.js';
 import { codingTools } from './coding.js';
 import { realpathSync } from 'node:fs';
@@ -28,7 +28,7 @@ const memory = args.includes('--memory') ? await SqliteMemoryStore.open(resolve(
 let host: StandaloneHarness;
 try { host = await StandaloneHarness.open({ dataDir, modelTimeoutMs, provider: new SubscriptionProvider({ model, reasoningEffort: 'low' }),
     tools: [...codingTools(workspace, resolve(dataDir, 'outputs'), !coding), ...(memory ? memoryTools(memory, () => host) : [])],
-    projectInstructions: await readProjectInstructions(workspace), composition: `default-v3:${workspace}:${model}`,
+    projectInstructions: async (messages, signal) => projectInstructionText(await readProjectInstructions(workspace, undefined, signal), projectInstructionTargets(messages, workspace)), composition: `default-v3:${workspace}:${model}`,
     extensions: webEnabled ? [{ id: 'ui.web', version: '1', apiVersion: 1, activate: async client => {
         const web = await attachWeb(client, { token: token!, port, hostname });
         return () => web.close();

@@ -650,11 +650,15 @@ it('keeps instructions stable and projects fresh budget state without accumulati
 });
 
 it('recovers referenced evidence from durable history without rerunning the source tool', async () => {
+    const { estimateContextTokens } = await import('@nucleic-se/agentic/runtime');
+    const { internalDefinitions: manifest } = await import('../src/standalone/tools.js');
+    // Keep the evidence allowance stable when truthful tool schemas gain detail.
+    const contextTokens = 6400 + estimateContextTokens({ messages: [], tools: manifest }).toolTokens;
     const evidence = 'Original evidence\n' + 'x'.repeat(10000) + '\nEXACT TAIL';
     const read = vi.fn(async () => ({ ok: true, content: evidence }));
     const path = await mkdtemp(join(tmpdir(), 'standalone-test-')); paths.push(path);
     let calls = 0;
-    const h = await StandaloneHarness.open({ dataDir: path, contextTokens: 7000, checkpointing: false,
+    const h = await StandaloneHarness.open({ dataDir: path, contextTokens, checkpointing: false,
         tools: [{ definition: { name: 'evidence', description: 'Read evidence', parameters: { type: 'object', properties: {} } }, effect: 'read', validate: () => ({}), execute: read }],
         provider: model(async request => {
             switch (calls++) {
