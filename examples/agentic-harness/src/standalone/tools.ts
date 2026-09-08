@@ -25,7 +25,7 @@ function definition(name: string, description: string, properties: NonNullable<T
     return { name, description, parameters: { type: 'object', properties, required, additionalProperties: false } };
 }
 export const internalDefinitions: ToolDefinition[] = [
-    definition('spawn_agent', 'Delegate a bounded task. Supply all relevant context in the objective; child gets its own session and a subset of your tools. Returns child ID.', { objective: text, tools: array, maxCalls: { type: 'integer' } }),
+    definition('spawn_agent', 'Delegate a bounded task with its needed context and selected parent tools. The child also gets read_tool_result for its own history when the parent has it. Returns child ID.', { objective: text, tools: array, maxCalls: { type: 'integer' } }),
     definition('wait_agents', 'Yield this worker until selected direct children finish. Their results return automatically. Do not poll.', { ids: array }),
     definition('message_agent', 'Send a bounded message to a direct child or your parent. Messages are applied at a safe turn boundary.', { id: text, message: text }),
     definition('cancel_agent', 'Cancel a direct child and its descendants.', { id: text }),
@@ -74,9 +74,12 @@ export function internalAction(tree: Tree, task: Task, name: string, args: Recor
         case 'spawn_agent': {
             if (Object.keys(tree.tasks).length - 1 >= tree.limits.children || task.depth >= tree.limits.depth)
                 throw new Error('Delegation limit reached');
-            const tools = args.tools as string[];
+            const tools = [...args.tools as string[]];
             if (tools.some(name => !task.tools.includes(name)))
                 throw new Error('Child tools must be a subset of parent tools');
+            // Recoverable context needs access to this child's receipts, not its parent's.
+            if (task.tools.includes('read_tool_result') && !tools.includes('read_tool_result'))
+                tools.push('read_tool_result');
             const id = createHash('sha256').update(`${task.id}:${callKey}`).digest('hex').slice(0, 32);
             if (!tree.tasks[id]) {
                 tree.tasks[id] = newTask(id, args.objective as string, tools, { parentId: task.id, depth: task.depth + 1, maxCalls: args.maxCalls as number });

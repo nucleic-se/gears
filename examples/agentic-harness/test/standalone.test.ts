@@ -140,6 +140,48 @@ it('keeps the reservation when provider dispatch has an unknown outcome', async 
     expect(current.usage).toEqual({ inputTokens: 0, outputTokens: 0 });
     expect((await host.store.events(tree.id)).find(e => e.type === 'model.receipt')?.data).toMatchObject({ dispatched: true });
 });
+it('delegates recoverable read context without requiring the model to grant archive plumbing', async () => {
+    const evidence = 'source '.repeat(1900) + 'exact ending';
+    let childTurns = 0;
+    const host = await open(model(async request => {
+        if (request.messages[0].content === 'child') {
+            expect(request.tools?.map(t => t.name).sort()).toEqual(['read_test', 'read_tool_result']);
+            if (childTurns++ === 0) return reply('', [tool('read_test', {}, 'source-a'), tool('read_test', {}, 'source-b')]);
+            if (childTurns === 2) {
+                expect(request.messages.some(m => m.content.includes('Tool output preview; exact saved text:'))).toBe(true);
+                return reply('', [tool('read_tool_result', { callId: 'source-a', offset: 12000 })]);
+            }
+            const saved = [...request.messages].reverse().find(m => m.role === 'tool_result' && m.toolName === 'read_tool_result');
+            expect(JSON.parse(saved!.content).content).toBe(evidence.slice(12000));
+            return reply('child verified');
+        }
+        const spawned = request.messages.find(m => m.role === 'tool_result' && m.toolName === 'spawn_agent');
+        if (!spawned) return reply('', [tool('spawn_agent', { objective: 'child', tools: ['read_test'], maxCalls: 4 })]);
+        if (!request.messages.some(m => m.role === 'tool_result' && m.toolName === 'wait_agents'))
+            return reply('', [tool('wait_agents', { ids: [JSON.parse(spawned.content).id] })]);
+        return reply('done');
+    }), undefined, { contextTokens: 6000, outputTokens: 200, checkpointing: false,
+        tools: [{ effect: 'read', definition: { name: 'read_test', description: 'Read source', parameters: { type: 'object' } },
+            validate: args => args, execute: async () => ({ ok: true, content: evidence }) }] });
+    const tree = await host.create('parent');
+    await state(host, tree.id, t => expect(t.tasks[t.id].phase).toBe('completed'));
+    const stored = (await host.store.get(tree.id))!;
+    const child = stored.tasks[stored.tasks[tree.id].children[0]];
+    expect(child.answer).toBe('child verified');
+    expect(child.messages.find(m => m.role === 'tool_result' && m.toolCallId === 'source-a')?.content).toBe(evidence);
+    expect(childTurns).toBe(3);
+    const { internalAction } = await import('../src/standalone/tools.js');
+    expect(() => internalAction(stored, child, 'read_tool_result', { callId: 'spawn_agent' }, 'parent-receipt'))
+        .toThrow('missing or ambiguous');
+    const parent = stored.tasks[tree.id];
+    expect(() => internalAction(stored, parent, 'spawn_agent', { objective: 'invalid', tools: ['unavailable'], maxCalls: 1 }, 'invalid'))
+        .toThrow('subset');
+    const args = { objective: 'restricted', tools: ['read_test'], maxCalls: 1 };
+    const restricted = JSON.parse(internalAction(stored, { ...parent, tools: ['read_test'] }, 'spawn_agent', args, 'restricted'));
+    expect(stored.tasks[restricted.id].tools).toEqual(['read_test']);
+    expect(args.tools).toEqual(['read_test']);
+});
+
 it('delegates two children, collects results, sleeps without a worker and resumes after reopen', async () => {
     const provider = model(vi.fn(async (request: TurnRequest) => {
         const objective = request.messages[0].content;
@@ -973,7 +1015,7 @@ it.each([false, true])('bounds rejected checkpoint retries and preserves source 
     const h = await open(model(async request => {
         if (!/^(Maintain a concise working checkpoint|Repair a rejected working checkpoint)/.test(request.system ?? '')) return reply('done');
         const evidence = JSON.parse(request.messages[0].content);
-        expect(evidence.output.targetCharacters).toBe(evidence.rejectedDraft ? 4000 : 8000);
+        expect(evidence.output.targetTokens).toBe(evidence.rejectedDraft ? 32 : 64);
         if (evidence.rejectedDraft) {
             expect(evidence.rejectedDraft).toBe('too_large');
             expect(evidence.draft).toBe('x'.repeat(8591));

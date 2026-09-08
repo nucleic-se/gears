@@ -444,6 +444,17 @@ stop for reconciliation. Gears commits each resulting intent and receipt through
 its existing transaction boundary. Runtime composition version 24 includes these
 semantics; existing active trees require their original composition.
 
+Children inherit `read_tool_result` when their parent has it, in addition to the
+explicitly selected tool subset. It reads only the child's own saved receipts;
+it cannot read the parent's history or rerun a source tool. This lets the shared
+context builder replace oversized read results with recoverable previews even
+when the model delegates only filesystem tools. Runtime composition version 25
+includes this delegation rule. Other tools still require explicit selection.
+
+Context composition version 20 uses Agentic's configured checkpoint output budget
+as its requested size instead of a separate fixed character target. It retains
+the same context ceiling, output reservation and candidate admission checks.
+
 ## Optional workspace recall
 
 Add `--memory` to enable explicit workspace notes alongside the configured coding
