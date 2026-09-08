@@ -1201,3 +1201,31 @@ it('uses the configured root allowance across continuation and reopen without re
     expect((await reopened.store.get(tree.id))!.tasks[tree.id].error).toBe('Shared model-call budget exhausted');
     expect(calls).toBe(32);
 });
+
+it('commits an invalid read receipt and still executes an independent source read', async () => {
+    const { codingToolRuntime } = await import('@nucleic-se/agentic/harness');
+    const { runtimeTools } = await import('../src/standalone/coding.js');
+    const { writeFile } = await import('node:fs/promises');
+    const workspace = await mkdtemp(join(tmpdir(), 'read-recovery-')); paths.push(workspace);
+    await writeFile(join(workspace, 'source'), 'verified evidence');
+    const coding = runtimeTools(codingToolRuntime(workspace, { readOnly: true }), () => 'read');
+    let turns = 0;
+    const h = await open(model(async request => {
+        if (!turns++) return reply('', [
+            tool('search_grep', { pattern: 'x', max_results: 150 }, 'bad'),
+            tool('fs_read', { path: 'source' }, 'good'),
+        ]);
+        const results = request.messages.filter(m => m.role === 'tool_result');
+        expect(results).toHaveLength(2);
+        expect(results[0]).toMatchObject({ toolCallId: 'bad', isError: true });
+        expect(results[1].content).toContain('verified evidence');
+        return reply('done');
+    }), undefined, { tools: coding });
+    const tree = await h.create('Read the source');
+    await state(h, tree.id, t => expect(t.tasks[tree.id].phase).toBe('completed'));
+    const events = await h.store.events(tree.id);
+    const intents = events.filter(e => e.type === 'tool.intent');
+    expect(intents).toHaveLength(1);
+    expect(JSON.stringify(intents[0])).toContain('good');
+    expect(turns).toBe(2);
+});

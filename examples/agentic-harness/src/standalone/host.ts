@@ -63,7 +63,7 @@ export class StandaloneHarness {
         if (options.context && !options.composition) throw new Error('Custom context requires an explicit composition identity');
         return createHarness().compose({
             extensions: [
-                { id: 'runtime.gears', version: '23', apiVersion: 1, configuration: JSON.stringify({ projectInstructions: options.projectInstructions ?? [], checkpointing: options.checkpointing ?? true, modelTimeoutMs, outputTokens: options.outputTokens ?? 1800, tools: (options.tools ?? []).map(tool => ({ definition: tool.definition, effect: tool.effect })) }), roles: { runtime: () => StandaloneHarness.openRuntime(options) } },
+                { id: 'runtime.gears', version: '24', apiVersion: 1, configuration: JSON.stringify({ projectInstructions: options.projectInstructions ?? [], checkpointing: options.checkpointing ?? true, modelTimeoutMs, outputTokens: options.outputTokens ?? 1800, tools: (options.tools ?? []).map(tool => ({ definition: tool.definition, effect: tool.effect })) }), roles: { runtime: () => StandaloneHarness.openRuntime(options) } },
                 { id: 'provider.gears', version: '1', apiVersion: 1, roles: { provider: () => options.provider } },
                 { id: 'context.gears', version: '19', apiVersion: 1, configuration: JSON.stringify({ tokens: options.contextTokens ?? 16000, custom: options.context ? options.composition : undefined }), roles: { context: () => options.context ?? { ...budgetedContext('', options.contextTokens ?? 16000, {
                     includeToolCallIds: (options.tools ?? []).some(tool => tool.definition.name === 'memory_save'),
@@ -527,7 +527,11 @@ export class StandaloneHarness {
             }
             now.generation++;
         };
-        const runtime: IValidatedToolRuntime = { tools: () => [], validate: (name, args) => {
+        const runtime: IValidatedToolRuntime = { tools: () => [],
+            effectFor: name => !task.tools.includes(name) ? undefined
+                : name === 'read_tool_result' ? 'read'
+                : internal(name) ? 'write' : this.plugins.get(name)?.effect,
+            validate: (name, args) => {
                 try {
                     if (!task.tools.includes(name))
                         throw new Error('Tool not granted');

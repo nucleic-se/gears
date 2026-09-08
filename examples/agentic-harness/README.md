@@ -435,6 +435,15 @@ Gears owns lease checks, shared-budget admission, queue scheduling and atomic
 state/receipt commits. Agentic owns source views, checkpoint fitting and cursors,
 lossless source preparation, model dispatch and tool-message conversion. The host
 supplies transient state to `checkpointView` instead of manually adjusting indexes.
+
+Tool plugins supply their declared effects to Agentic's shared batch executor.
+When every call is a read, an invalid call produces its own error without
+discarding valid authorized reads. Batches containing a write or undeclared
+effect keep whole-batch argument rejection; uncertain dispatched outcomes still
+stop for reconciliation. Gears commits each resulting intent and receipt through
+its existing transaction boundary. Runtime composition version 24 includes these
+semantics; existing active trees require their original composition.
+
 ## Optional workspace recall
 
 Add `--memory` to enable explicit workspace notes alongside the configured coding
