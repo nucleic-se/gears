@@ -26,6 +26,7 @@ export interface Task {
     calls: number;
     maxCalls: number;
     generation: number;
+    /** Active or unacknowledged model operation; known settled outcomes clear it. */
     operationId?: string;
     reservation?: number;
     /** Undispatched work waiting for observed model reservations to settle. */

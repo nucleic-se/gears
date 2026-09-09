@@ -154,7 +154,29 @@ uncertain call. Send a separate continuation message to execute the remaining
 pending calls and continue the model. Existing receipts remain intact; a verified
 correction is included in subsequent context. If the process died before any
 receipt, resolution supplies that missing tool result. Unknown model requests
-cannot be resolved through this tool API. There is no resolution form in the UI yet.
+use the acknowledgement API below. There is no resolution form in the UI yet.
+
+### Continuing after an unknown model outcome
+
+If the task stopped with an unknown model outcome, inspect its `operationId` and
+journal. Call `host.acknowledgeModel(treeId, taskId, operationId, expectedRevision)`
+to accept that uncertainty and leave the task `paused`. Then send a separate
+continuation message. The HTTP equivalent is
+`POST /api/tasks/:id/acknowledge-model` with `{ taskId, operationId, expectedRevision }`.
+There is no acknowledgement form in the UI yet.
+
+This acknowledges possible provider processing or cost; it does not establish
+what the lost response contained. Known history, progress notes, context state,
+usage, charges, call counts and expiry remain intact. Unknown usage stays charged
+at its existing estimate, not zero. Acknowledgement neither dispatches a request
+nor replays a tool; continuation prepares a new model operation from saved state
+under the remaining allowances. Active steps, stale revisions, expired tasks,
+wrong operations and unresolved tool effects are rejected.
+
+The same API applies to children. Previously delivered child results remain in
+the parent's history. A parent still waiting for that child observes its eventual
+completion; an already completed parent needs an explicit follow-up to consider
+the new result. Acknowledgement never silently reruns the parent.
 
 Worker recovery uses the host's 15-second lease window with one-second heartbeats.
 This releases a dead queue attempt's concurrency slot after restart; it does not
@@ -164,9 +186,10 @@ impose a 15-second limit on healthy calls. Retry limits remain zero.
 
 Safe checkpoints (between model/tool calls, while waiting, and while sleeping)
 resume after restart. A model or external tool that may have executed without a
-receipt is marked `unknown`; it is never silently replayed. Inspect events and
-start new work with the evidence. This version does not provide an operation
-resolution UI. Cancellation is best effort and cannot undo an external effect.
+receipt is marked `unknown`; it is never silently replayed. Inspect events, then
+acknowledge model uncertainty or resolve the external tool outcome before sending
+a continuation. Failed or cancelled tasks require new work; these APIs apply only
+to unknown outcomes. Cancellation is best effort and cannot undo an external effect.
 
 Default tree limits: 60 model calls, eight children, two delegation levels, and
 24-hour expiry. Each task also has an individual call limit. Cumulative token

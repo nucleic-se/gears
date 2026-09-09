@@ -64,6 +64,10 @@ export async function attachWeb(host: StandaloneHarness, options: {
                     const body = await json(req);
                     result = await host.resolveTool(id, body.taskId === undefined ? id : string(body.taskId, 100), string(body.callId, 1000), body.resolution as OperationResolution);
                 }
+                else if (req.method === 'POST' && parts[3] === 'acknowledge-model' && parts.length === 4) {
+                    const body = await json(req);
+                    result = await host.acknowledgeModel(id, body.taskId === undefined ? id : string(body.taskId, 100), string(body.operationId, 1000), body.expectedRevision as number);
+                }
                 else {
                     res.writeHead(404);
                     res.end();

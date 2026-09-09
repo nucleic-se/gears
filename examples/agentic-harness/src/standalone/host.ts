@@ -79,7 +79,7 @@ export class StandaloneHarness {
         if (options.context && !options.composition) throw new Error('Custom context requires an explicit composition identity');
         return createHarness().compose({
             extensions: [
-                { id: 'runtime.gears', version: '32', apiVersion: 1, configuration: JSON.stringify({ rootTools, projectInstructions: typeof options.projectInstructions === 'function' ? { dynamic: true, composition: options.composition } : options.projectInstructions ?? [], checkpointing: options.checkpointing ?? true, modelTimeoutMs, outputTokens: options.outputTokens ?? 1800, tools: (options.tools ?? []).map(tool => ({ definition: tool.definition, effect: tool.effect })) }), roles: { runtime: () => StandaloneHarness.openRuntime(options) } },
+                { id: 'runtime.gears', version: '33', apiVersion: 1, configuration: JSON.stringify({ rootTools, projectInstructions: typeof options.projectInstructions === 'function' ? { dynamic: true, composition: options.composition } : options.projectInstructions ?? [], checkpointing: options.checkpointing ?? true, modelTimeoutMs, outputTokens: options.outputTokens ?? 1800, tools: (options.tools ?? []).map(tool => ({ definition: tool.definition, effect: tool.effect })) }), roles: { runtime: () => StandaloneHarness.openRuntime(options) } },
                 { id: 'provider.gears', version: '2', apiVersion: 1, configuration: providerIdentity, roles: { provider: () => options.provider } },
                 { id: 'context.gears', version: '27', apiVersion: 1, configuration: JSON.stringify({ tokens: contextTokens!, custom: options.context ? options.composition : undefined }), roles: { context: () => options.context ?? { ...budgetedContext('', contextTokens!, {
                     includeToolCallIds: (options.tools ?? []).some(tool => tool.definition.name === 'memory_save'),
@@ -145,9 +145,9 @@ export class StandaloneHarness {
                         for (const task of Object.values(current.tasks)) {
                             if (task.phase === 'cancelled' && task.reservation !== undefined) task.operationId = undefined;
                             if (task.phase === 'model' || task.phase === 'external') {
+                                if (task.phase === 'external') task.operationId = undefined;
                                 task.phase = 'unknown';
-                                task.error = 'Process stopped during an external operation; inspect receipts before resolving or starting new work';
-                                task.operationId = undefined;
+                                task.error = 'Process stopped during an external operation; inspect receipts before continuing';
                                 task.generation++;
                             }
                         }
@@ -226,7 +226,7 @@ export class StandaloneHarness {
                 if (!task)
                     throw new Error('Unknown task');
                 if (['unknown', 'cancelled', 'failed'].includes(task.phase))
-                    throw new Error('Stopped or unknown execution requires review; resolve uncertain tool effects or create a new task with the evidence');
+                    throw new Error('Stopped or unknown execution requires review; acknowledge model uncertainty or resolve tool effects before continuing');
                 task.inbox ??= [];
                 if (task.inbox.length >= 16)
                     throw new Error('Inbox full');
@@ -239,6 +239,41 @@ export class StandaloneHarness {
                 }
             }, taskId);
             await this.dispatch(tree);
+        });
+    }
+    /** Accept an unknown model outcome without refunding its charge. A separate send continues. */
+    acknowledgeModel(treeId: string, taskId: string, operationId: string, expectedRevision: number) {
+        if (typeof operationId !== 'string' || !operationId.trim() || !Number.isSafeInteger(expectedRevision) || expectedRevision < 0)
+            return Promise.reject(new Error('Model acknowledgement requires an operation ID and current revision'));
+        return this.admitted(async () => {
+            await this.assertLease();
+            const snapshot = await this.store.get(treeId);
+            if (!snapshot) throw new Error('Unknown task tree');
+            this.validateComposition(snapshot);
+            const check = (tree: Tree, revision: number) => {
+                if (tree.revision !== revision) throw new Error('Tree revision conflict');
+                if (Date.now() >= tree.limits.expiresAt) throw new Error('Task lifetime expired');
+                const task = tree.tasks[taskId];
+                if (this.active.has(taskId)) throw new Error('Wait for the active step to finish before acknowledging');
+                if (!task || task.phase !== 'unknown' || task.operationId !== operationId || task.activeTool || task.pending.length)
+                    throw new Error('Operation is not an unknown model outcome');
+                return task;
+            };
+            check(snapshot, expectedRevision);
+            let revision = expectedRevision;
+            if (snapshot.ownerEpoch !== this.store.epoch) {
+                await this.store.claim(snapshot);
+                revision++;
+            }
+            return this.store.change(treeId, 'model.acknowledged', current => {
+                const task = check(current, revision);
+                task.phase = 'paused';
+                delete task.operationId;
+                // The old liability remains in chargedTokens and the original journal.
+                delete task.reservation;
+                delete task.error;
+                task.generation++;
+            }, taskId, { operationId });
         });
     }
     /** Record a verified external outcome. A separate send resumes the paused task. */
@@ -511,8 +546,10 @@ export class StandaloneHarness {
                         cancelTask(current, task.id);
                         now.error = 'Task expired';
                     }
-                    if (now.phase === 'cancelled')
+                    if (now.phase === 'cancelled') {
+                        delete now.operationId;
                         return;
+                    }
                     let contextError: string | undefined;
                     if (receipt.outcome === 'completed' && step.reduce) {
                         try {
@@ -549,6 +586,7 @@ export class StandaloneHarness {
                                 now.answer = receipt.response.message.content;
                         }
                     }
+                    if (now.phase !== 'unknown') delete now.operationId;
                     now.generation++;
                 }, task.id, contextData);
             },
