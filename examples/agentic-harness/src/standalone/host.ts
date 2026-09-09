@@ -66,11 +66,11 @@ export class StandaloneHarness {
             extensions: [
                 { id: 'runtime.gears', version: '26', apiVersion: 1, configuration: JSON.stringify({ projectInstructions: typeof options.projectInstructions === 'function' ? { dynamic: true, composition: options.composition } : options.projectInstructions ?? [], checkpointing: options.checkpointing ?? true, modelTimeoutMs, outputTokens: options.outputTokens ?? 1800, tools: (options.tools ?? []).map(tool => ({ definition: tool.definition, effect: tool.effect })) }), roles: { runtime: () => StandaloneHarness.openRuntime(options) } },
                 { id: 'provider.gears', version: '1', apiVersion: 1, roles: { provider: () => options.provider } },
-                { id: 'context.gears', version: '21', apiVersion: 1, configuration: JSON.stringify({ tokens: options.contextTokens ?? 16000, custom: options.context ? options.composition : undefined }), roles: { context: () => options.context ?? { ...budgetedContext('', options.contextTokens ?? 16000, {
+                { id: 'context.gears', version: '22', apiVersion: 1, configuration: JSON.stringify({ tokens: options.contextTokens ?? 16000, custom: options.context ? options.composition : undefined }), roles: { context: () => options.context ?? { ...budgetedContext('', options.contextTokens ?? 16000, {
                     includeToolCallIds: (options.tools ?? []).some(tool => tool.definition.name === 'memory_save'),
                     minRecentGroups: 3, // Two recent exchanges plus the transient state message.
                     referenceToolResult: archivedToolResultReference,
-                }), lifecycle: options.checkpointing === false ? referenceContextLifecycle() : checkpointContextLifecycle({ maxTokens: Math.min(outputTokens, 800), triggerRatio: 0.8 }) } } },
+                }), lifecycle: options.checkpointing === false ? referenceContextLifecycle() : checkpointContextLifecycle({ maxTokens: Math.min(outputTokens, 800) }) } } },
                 ...options.extensions ?? [],
             ],
             driver: {

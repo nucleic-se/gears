@@ -507,3 +507,7 @@ Prepared requests retain the exact rendered instructions for inspection.
 
 The runtime and context composition revisions changed. Open old active task trees
 with their original composition, or use a fresh data directory for this revision.
+
+The default context uses Agentic's loss-driven checkpoint policy: exact archive
+previews do not themselves trigger generated summaries. Evicted or lossy history
+still requires preservation. Maintenance remains charged to the shared allowance.
