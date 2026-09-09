@@ -202,6 +202,7 @@ export class StandaloneHarness {
             return tree;
         });
     }
+    /** Persist and schedule a message. Resolves after admission, not task completion. */
     send(treeId: string, taskId: string, message: string) {
         return this.admitted(async () => {
             if (!message.trim() || message.length > 8000)
@@ -647,6 +648,7 @@ export class StandaloneHarness {
                 }
             } });
     }
+    /** Cancel active work and drain shutdown receipts; this does not wait for tasks to finish. */
     async close() {
         if (this.stopped)
             return;

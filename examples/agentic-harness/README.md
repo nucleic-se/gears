@@ -75,6 +75,13 @@ Example task:
 
 `StandaloneHarness.open({ dataDir, provider, tools, context, composition, extensions })`
 composes the Agentic harness with the Gears driver. It exposes `create`, `send`, `cancel`, `store` and `close`.
+
+`await host.send(treeId, taskId, message)` persists and schedules the message; it
+does not wait for the task to finish. Keep the host running while observing task
+state through `inspect` or `store.get`. Closing immediately after `send` can
+interrupt the newly admitted work. A program that needs the answer must observe
+completion before closing; shutdown is not a completion wait.
+
 `HarnessTool` provides a definition, pure argument validation, an explicit
 read/write effect classification, and execution. Tools are trusted host code;
 registering an effectful tool grants it to the default root agent. Children can
@@ -90,7 +97,8 @@ pass through the same boundary as the local Agentic agent.
 `extensions` use Agentic's `HarnessExtension<GearsHarnessRoles, StandaloneHarness>`.
 The composition owns `runtime`, `provider` and `context` roles. The CLI attaches
 its optional web UI through extension activation. Shutdown rejects new commands,
-drains admitted commands and workers, disposes attached extensions, then releases
+requests cancellation of active work, drains admitted commands and shutdown
+receipts, disposes attached extensions, then releases
 the runtime lease and database. Extension disposers can still read committed state.
 
 **Alpha persistence break:** newly created trees use a fingerprinted composition
