@@ -66,6 +66,22 @@ Example task:
 
 ## Ownership and extension points
 
+The coding CLI composes Agentic's `codingAgentContext` and coding tools with the
+queued Gears driver. Coding instructions, scoped project-instruction discovery,
+tool-result labels, archive references and checkpoint policy are shared with the
+local default agent. The CLI reserves the same 4096 output tokens; Gears adds its
+live state suffix when orchestration capabilities are enabled. Agentic protects
+that status separately from the shared recent-conversation allowance.
+Tool grants preserve the composition's declared order.
+
+The lower-level `StandaloneHarness.open` remains a generic task host. Its default
+context uses Agentic's `agentContext` with generic task instructions. Supplying
+`context` replaces the complete policy, including system/project instructions and
+lifecycle; the driver no longer overrides the custom strategy's system prompt.
+Use a new composition identity when changing that policy. These alpha changes
+alter the runtime fingerprint: active tasks still require their original runtime
+and configuration; they are not silently migrated.
+
 | Component | Responsibility |
 | --- | --- |
 | Gears `IQueue` / `Worker` | Durable steps, per-task concurrency keys, parallel children, cancellation and shutdown |
@@ -294,11 +310,13 @@ tool content and inherit the UI's authentication boundary.
 ### Stable instructions and current state
 
 The Gears composition keeps its core system instruction stable; project instructions
-can refresh as described below. Each request ends
-with one protected, host-generated state message containing current call/token
+can refresh as described below. Tasks with orchestration capabilities or saved
+progress notes receive one protected, host-generated state message containing current call/token
 availability, progress notes and artifact names. That message is counted by the
 shared Agentic context pipeline and retained in the exact request intent, but is
 not appended to conversation history. Later requests replace it with fresh state.
+Coding-only tasks without progress notes receive no orchestration state. Scheduling
+and child-capacity fields appear only when the task can use those capabilities.
 Progress notes remain untrusted agent content, not system instructions.
 
 This preserves a stable prefix where selected history permits it; provider cache

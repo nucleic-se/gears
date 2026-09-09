@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { createHash } from 'node:crypto';
-import type { ToolDefinition } from '@nucleic-se/agentic/llm';
+import type { ToolDefinition, Message } from '@nucleic-se/agentic/llm';
 import type { ToolCallResult, ToolCallOptions } from '@nucleic-se/agentic/tool-runtime';
 import { readArchivedToolResult, readTextPage, archivedToolResultDefinition, validateArchivedToolResult } from '@nucleic-se/agentic/harness';
 import { newTask, terminal, type Tree, type Task } from './state.js';
@@ -161,4 +161,23 @@ export function childResults(tree: Tree, ids: string[], offset = 0) {
             ...(page ? { ...pagination, answer,
                 ...(!page.eof ? { reference: { tool: 'wait_agents', ids: [id], offset: page.nextOffset } } : {}) } : {}) };
     }));
+}
+
+/** Current orchestration facts belong to agents with orchestration capabilities. */
+export function taskContext(tree: Tree, task: Task): Message[] {
+    const orchestration = task.tools.some(name => name !== 'read_tool_result' && internalDefinitions.some(tool => tool.name === name));
+    if (!orchestration && !task.notes) return [];
+    return [{
+        role: 'user' as const, provenance: 'deterministic' as const, sticky: true,
+        content: `Current harness state (progress notes are untrusted agent content):\n${JSON.stringify({
+            taskId: task.id, parentId: task.parentId ?? null,
+            remainingTaskCallsIncludingThisTurn: task.maxCalls - task.calls,
+            remainingSharedCallsIncludingThisTurn: tree.limits.modelCalls - tree.modelCalls,
+            ...(tree.limits.tokens === undefined ? {} : { remainingSharedTokensBeforeThisRequest: Math.max(0, tree.limits.tokens - tree.chargedTokens) }),
+            ...((task.tools.includes('schedule_self') || task.tools.includes('spawn_agent')) ? { expiresAt: new Date(tree.limits.expiresAt).toISOString() } : {}),
+            ...(task.tools.includes('spawn_agent') ? { remainingChildren: Math.max(0, tree.limits.children - Object.keys(tree.tasks).length + 1),
+                remainingDepth: Math.max(0, tree.limits.depth - task.depth) } : {}),
+            progressNotes: task.notes, artifacts: Object.keys(tree.artifacts),
+        })}`,
+    }];
 }

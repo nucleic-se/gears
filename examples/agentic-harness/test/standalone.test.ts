@@ -1,3 +1,4 @@
+import { toolText } from './presented-tool-result.js';
 import { checkpointContextLifecycle, referenceContextLifecycle, budgetedContext, type CheckpointContextState } from '@nucleic-se/agentic/harness';
 import { afterEach, expect, it, vi } from 'vitest';
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -45,7 +46,7 @@ it('presents fresh evidence intact when the context has room', async () => {
     const provider = model(async request => {
         if (!turns++) return reply('', [tool('read_test', {})]);
         const result = request.messages.find(message => message.role === 'tool_result');
-        expect(result?.content).toBe(evidence);
+        expect(toolText(result!)).toBe(evidence);
         return reply('verified');
     });
     const host = await open(provider, undefined, { tools: [{ effect: 'read', definition: { name: 'read_test', description: 'Read evidence', parameters: { type: 'object' } }, validate: args => args, execute: async () => ({ ok: true, content: evidence }) }] });
@@ -153,13 +154,13 @@ it('delegates recoverable read context without requiring the model to grant arch
                 return reply('', [tool('read_tool_result', { callId: 'source-a', offset: 12000 })]);
             }
             const saved = [...request.messages].reverse().find(m => m.role === 'tool_result' && m.toolName === 'read_tool_result');
-            expect(JSON.parse(saved!.content).content).toBe(evidence.slice(12000));
+            expect(JSON.parse(toolText(saved!)).content).toBe(evidence.slice(12000));
             return reply('child verified');
         }
         const spawned = request.messages.find(m => m.role === 'tool_result' && m.toolName === 'spawn_agent');
         if (!spawned) return reply('', [tool('spawn_agent', { objective: 'child', tools: ['read_test'], maxCalls: 4 })]);
         if (!request.messages.some(m => m.role === 'tool_result' && m.toolName === 'wait_agents'))
-            return reply('', [tool('wait_agents', { ids: [JSON.parse(spawned.content).id] })]);
+            return reply('', [tool('wait_agents', { ids: [JSON.parse(toolText(spawned)).id] })]);
         return reply('done');
     }), undefined, { contextTokens: 6000, outputTokens: 200, checkpointing: false,
         tools: [{ effect: 'read', definition: { name: 'read_test', description: 'Read source', parameters: { type: 'object' } },
@@ -194,7 +195,7 @@ it('delegates two children, collects results, sleeps without a worker and resume
         if (turns === 0)
             return reply('', [tool('spawn_agent', { objective: 'child A', tools: [], maxCalls: 2 }, 'a'), tool('spawn_agent', { objective: 'child B', tools: [], maxCalls: 2 }, 'b')]);
         if (turns === 1) {
-            const ids = request.messages.filter(m => m.role === 'tool_result' && m.toolName === 'spawn_agent').map(m => JSON.parse(m.content).id);
+            const ids = request.messages.filter(m => m.role === 'tool_result' && m.toolName === 'spawn_agent').map(m => JSON.parse(toolText(m)).id);
             return reply('', [tool('wait_agents', { ids })]);
         }
         if (turns === 2)
@@ -675,10 +676,10 @@ it('recovers referenced evidence from durable history without rerunning the sour
             switch (calls++) {
                 case 0: return reply('', [tool('evidence', {})]);
                 case 1:
-                    expect(request.messages.find(message => message.role === 'tool_result')?.content).toBe(evidence);
+                    expect(toolText(request.messages.find(message => message.role === 'tool_result')!)).toBe(evidence);
                     return reply('', [tool('save_progress', { notes: 'Verify the exact end of the earlier evidence.' })]);
                 case 2:
-                    expect(request.messages.find(message => message.role === 'tool_result')?.content).toBe(evidence);
+                    expect(toolText(request.messages.find(message => message.role === 'tool_result')!)).toBe(evidence);
                     // Grow protected state; the saved source must remain retrievable after it is no longer recent.
                     return reply('', [tool('save_progress', { notes: 'Now recover the saved tail. ' + 'n'.repeat(7000) }, 'progress-again')]);
                 case 3:
@@ -686,7 +687,7 @@ it('recovers referenced evidence from durable history without rerunning the sour
                     return reply('', [tool('read_tool_result', { callId: 'evidence', offset: 8000 })]);
                 default: {
                     const retrieved = request.messages.filter(message => message.role === 'tool_result' && message.toolName === 'read_tool_result').at(-1)!;
-                    expect(JSON.parse(retrieved.content)).toMatchObject({ content: evidence.slice(8000), eof: true, nextOffset: evidence.length });
+                    expect(JSON.parse(toolText(retrieved))).toMatchObject({ content: evidence.slice(8000), eof: true, nextOffset: evidence.length });
                     return reply('verified');
                 }
             }
@@ -824,7 +825,7 @@ it('presents recent diagnostics within context while retaining exact retrievable
         if (turn++ === 0) return reply('', [tool('diagnostic', {})]);
         if (turn === 2) {
             const result = request.messages.find(m => m.role === 'tool_result' && m.toolName === 'diagnostic')!;
-            expect(result.content.length).toBeLessThanOrEqual(4000);
+            expect(toolText(result).length).toBeLessThanOrEqual(4000);
             expect(result.content).toContain('Assertion failed at test.ts:12');
             expect(result.content).toContain('Exit code: 1');
             expect(result.content).toContain('read_tool_result');
@@ -832,7 +833,7 @@ it('presents recent diagnostics within context while retaining exact retrievable
             return reply('', [tool('read_tool_result', { messageIndex: 2, offset: 30000 })]);
         }
         const recovered = request.messages.find(m => m.role === 'tool_result' && m.toolName === 'read_tool_result')!;
-        expect(JSON.parse(recovered.content).content).toBe(diagnostic.slice(30000, 38000));
+        expect(JSON.parse(toolText(recovered)).content).toBe(diagnostic.slice(30000, 38000));
         return reply('diagnostic recovered');
     }), undefined, { contextTokens: 8000, tools: [{
         definition: { name: 'diagnostic', description: 'Return test failure evidence', parameters: { type: 'object', properties: {} } },
@@ -870,7 +871,7 @@ it('retrieves spilled coding output after reopen without projecting the retrieva
         }
         if (turn === 3) return reply('', [tool('read_output', { id: outputId, offset: 70000 })]);
         const output = request.messages.filter(m => m.role === 'tool_result' && m.toolName === 'read_output').at(-1)!;
-        expect(JSON.parse(output.content)).toMatchObject({ content: '"'.repeat(4000), eof: true });
+        expect(JSON.parse(toolText(output))).toMatchObject({ content: '"'.repeat(4000), eof: true });
         return reply('retrieved exact output');
     });
     const first = await open(provider, undefined, { tools: makeTools(), composition: 'output-recovery-test' });
@@ -926,7 +927,7 @@ it.each([false, true])('journals automatic checkpoints atomically (partial=%s)',
 it('checkpoints at the reported context threshold before dropping or shortening history', async () => {
     const { budgetedContext } = await import('@nucleic-se/agentic/harness');
     const { internalDefinitions } = await import('../src/standalone/tools.js');
-    const context = budgetedContext('', 6000, { minRecentGroups: 3 });
+    const context = budgetedContext('', 6000);
     let inspected = false, maintenance = 0;
     const h = await open(model(async request => {
         if (/^(Maintain a concise working checkpoint|Repair a rejected working checkpoint)/.test(request.system ?? '')) {
@@ -940,7 +941,7 @@ it('checkpoints at the reported context threshold before dropping or shortening 
         lifecycle: checkpointContextLifecycle({ maxTokens: 64, triggerRatio: 0.8 }),
         async assemble(messages, signal, options) {
             const selected = await context.assemble(messages, signal, options);
-            if (!inspected && options?.system?.startsWith('You are a standalone')) {
+            if (!inspected && options?.system === undefined) {
                 inspected = true;
                 expect(selected.report!.tokenBudget).toBe(6000);
                 expect(selected.report!.usage.totalTokens).toBeGreaterThanOrEqual(4800);
@@ -957,6 +958,7 @@ it('checkpoints at the reported context threshold before dropping or shortening 
     await h.reconcile();
     await state(h, tree.id, current => expect(current.tasks[tree.id].phase).toBe('completed'));
     expect(maintenance).toBe(1);
+    expect(inspected).toBe(true);
     expect((await h.store.get(tree.id))!.tasks[tree.id].messages.slice(0, original.length)).toEqual(original);
 });
 
@@ -965,7 +967,10 @@ it('preserves rich tool results in the next request and after reopening', async 
     let calls = 0;
     const provider = model(async request => {
         if (calls++ === 0) return reply('', [tool('image_evidence', {})]);
-        expect(request.messages.find(m => m.role === 'tool_result' && m.toolName === 'image_evidence')).toMatchObject({ contentBlocks: blocks });
+        const result = request.messages.find(m => m.role === 'tool_result' && m.toolName === 'image_evidence')!;
+        if (result.role !== 'tool_result') throw new Error('Expected image tool result');
+        expect(toolText(result)).toBe('Image attached');
+        expect(result.contentBlocks).toEqual([{ type: 'text', text: `${JSON.stringify({ toolCallId: result.toolCallId })}\n` }, ...blocks]);
         return reply('Image received');
     });
     const h = await open(provider, undefined, { tools: [{ definition: { name: 'image_evidence', description: 'Read image evidence', parameters: { type: 'object', properties: {} } }, effect: 'read', validate: args => args,
@@ -1122,7 +1127,7 @@ it('replaces generated checkpoints with direct source selection without queued d
         calls++;
         expect(request.messages.some(m => m.content.startsWith('Working checkpoint'))).toBe(false);
         expect(request.messages.some(m => m.content === 'Do not release before security verification.')).toBe(true);
-        expect(request.messages.at(-1)?.content).toContain('Current harness state');
+        expect(request.messages.some(message => message.content.startsWith('Current harness state'))).toBe(false);
         return reply('Security verification remains unfinished.');
     });
     const h = await open(provider, undefined, { context, composition: 'direct-context-test', outputTokens: 64 });

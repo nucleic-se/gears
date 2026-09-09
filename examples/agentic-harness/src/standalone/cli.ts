@@ -2,12 +2,13 @@ import { randomBytes } from 'node:crypto';
 import { resolve } from 'node:path';
 import { SubscriptionProvider } from '@nucleic-se/agentic/providers/subscription';
 import { StandaloneHarness } from './host.js';
-import { readProjectInstructions, projectInstructionText, projectInstructionTargets } from '@nucleic-se/agentic/harness';
+import { codingAgentContext, resolveContextBudget } from '@nucleic-se/agentic/harness';
 import { attachWeb } from './web.js';
 import { codingTools } from './coding.js';
 import { realpathSync } from 'node:fs';
 import { SqliteMemoryStore } from '@nucleic-se/agentic/runtime';
 import { memoryTools } from './memory.js';
+import { internalDefinitions } from './tools.js';
 const args = process.argv.slice(2);
 function option(name: string, fallback: string) {
     const index = args.indexOf(name);
@@ -24,16 +25,24 @@ const hostname = option('--host', '127.0.0.1'), port = Number(option('--port', '
 const model = option('--model', 'gpt-6-astra');
 const modelTimeoutMs = Number(option('--model-timeout-ms', '300000'));
 const coding = args.includes('--coding');
+const provider = new SubscriptionProvider({ model, reasoningEffort: 'low' });
 const memory = args.includes('--memory') ? await SqliteMemoryStore.open(resolve(dataDir, 'memory.sqlite'), realpathSync(workspace)) : undefined;
 let host: StandaloneHarness;
-try { host = await StandaloneHarness.open({ dataDir, modelTimeoutMs, provider: new SubscriptionProvider({ model, reasoningEffort: 'low' }),
-    tools: [...codingTools(workspace, resolve(dataDir, 'outputs'), !coding), ...(memory ? memoryTools(memory, () => host) : [])],
-    projectInstructions: async (messages, signal) => projectInstructionText(await readProjectInstructions(workspace, undefined, signal), projectInstructionTargets(messages, workspace)), composition: `default-v3:${workspace}:${model}`,
-    extensions: webEnabled ? [{ id: 'ui.web', version: '1', apiVersion: 1, activate: async client => {
-        const web = await attachWeb(client, { token: token!, port, hostname });
-        return () => web.close();
-    } }] : [],
-}); } catch (error) { await memory?.close(); throw error; }
+try {
+    const codingPack = codingTools(workspace, resolve(dataDir, 'outputs'), !coding);
+    const memoryPack = memory ? memoryTools(memory, () => host) : [];
+    const tools = [...codingPack, ...memoryPack];
+    const rootTools = [...codingPack.map(tool => tool.definition.name), 'read_tool_result', ...memoryPack.map(tool => tool.definition.name), ...internalDefinitions.filter(tool => tool.name !== 'read_tool_result').map(tool => tool.name)];
+    host = await StandaloneHarness.open({ dataDir, modelTimeoutMs, provider, outputTokens: 4096,
+        tools, rootTools,
+        context: codingAgentContext({ workspace, tokenBudget: resolveContextBudget(provider) }),
+        composition: `coding-v5:${workspace}:${model}`,
+        extensions: webEnabled ? [{ id: 'ui.web', version: '1', apiVersion: 1, activate: async client => {
+            const web = await attachWeb(client, { token: token!, port, hostname });
+            return () => web.close();
+        } }] : [],
+    });
+} catch (error) { await memory?.close(); throw error; }
 try {
     console.log(JSON.stringify({ type: 'ready', ...(webEnabled ? { url: `http://${hostname}:${port}`, token } : {}), workspace, dataDir, coding }));
     process.send?.({ type: 'ready' });

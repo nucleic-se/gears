@@ -1,3 +1,4 @@
+import { toolText } from './presented-tool-result.js';
 import { afterEach, expect, it, vi } from 'vitest';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -40,7 +41,7 @@ it.each([false, true])('continues known tool history after unknown model output,
     const turn = vi.fn<ILLMProvider['turn']>(async request => {
         if (++calls === 1) return reply('', [{ id: 'read-once', name: 'read_test', args: {} }]);
         if (calls === 2) throw knownUsage ? new LLMProtocolError('Malformed response', { usage: { inputTokens: 20, outputTokens: 3 } }) : new Error('Connection lost');
-        expect(request.messages.some(m => m.role === 'tool_result' && m.content === 'Exact durable source result')).toBe(true);
+        expect(toolText(request.messages.find(m => m.role === 'tool_result' && m.toolCallId === 'read-once')!)).toBe('Exact durable source result');
         expect(request.messages.some(m => m.role === 'user' && m.content === 'Continue from saved evidence')).toBe(true);
         return reply('Recovered');
     });
@@ -166,7 +167,7 @@ it.each(['completed', 'waiting'] as const)('continues an unknown child with a %s
         }
         if (!parentCalls++) return reply('', [{ id: 'spawn', name: 'spawn_agent', args: { objective: 'Child review', tools: [], maxCalls: 5 } }]);
         const result = request.messages.find(m => m.role === 'tool_result' && m.toolCallId === 'spawn')!;
-        if (parentCalls === 2) return reply('', [{ id: 'wait', name: 'wait_agents', args: { ids: [JSON.parse(result.content).id] } }]);
+        if (parentCalls === 2) return reply('', [{ id: 'wait', name: 'wait_agents', args: { ids: [JSON.parse(toolText(result)).id] } }]);
         return reply('Parent observed child result');
     }), { rootTools: ['spawn_agent', 'wait_agents'] });
     const created = await host.create('Parent review'); let before = await settled(host, created.id, 'completed');

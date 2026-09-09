@@ -2,7 +2,7 @@ import { expect, it } from 'vitest';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { internalAction, internalDefinitions, validateInternal, childResults } from '../src/standalone/tools.js';
+import { internalAction, internalDefinitions, validateInternal, childResults, taskContext } from '../src/standalone/tools.js';
 import { StandaloneHarness } from '../src/standalone/host.js';
 import { newTask, type Tree } from '../src/standalone/state.js';
 
@@ -104,4 +104,20 @@ it('snapshots root grants, advertises only granted tools and rejects calls outsi
 it('rejects unknown root grants before opening resources', async () => {
     await expect(StandaloneHarness.open({ contextTokens: 16000, dataDir: '/unused', rootTools: ['missing'],
         provider: { configurationIdentity: 'test-provider', structured: async () => { throw new Error('unused'); }, turn: async () => { throw new Error('unused'); } } })).rejects.toThrow('Root tool grant');
+});
+
+
+it('scopes task state to orchestration capabilities while retaining existing progress notes', () => {
+    const task = newTask('root', 'Review source', ['fs_read', 'read_tool_result']);
+    const tree: Tree = { id: 'root', revision: 0, ownerEpoch: 'test', createdAt: Date.now(), updatedAt: Date.now(), usage: { inputTokens: 0, outputTokens: 0 }, composition: 'test', tasks: { root: task }, modelCalls: 2, chargedTokens: 100, artifacts: {},
+        limits: { modelCalls: 20, children: 3, depth: 2, expiresAt: Date.now() + 60000 } };
+    expect(taskContext(tree, task)).toEqual([]);
+    task.tools.push('schedule_self');
+    const scheduled = JSON.parse(taskContext(tree, task)[0].content.split('\n')[1]);
+    expect(scheduled).toMatchObject({ taskId: 'root', remainingSharedCallsIncludingThisTurn: 18, expiresAt: new Date(tree.limits.expiresAt).toISOString() });
+    expect(scheduled).not.toHaveProperty('remainingChildren');
+    task.tools = ['read_tool_result'];
+    task.notes = 'Preserve this earlier decision.';
+    expect(taskContext(tree, task)[0]).toMatchObject({ sticky: true, provenance: 'deterministic' });
+    expect(taskContext(tree, task)[0].content).toContain(task.notes);
 });

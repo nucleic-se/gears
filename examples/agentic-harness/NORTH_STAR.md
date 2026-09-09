@@ -10,6 +10,12 @@ progress and scheduled continuation. Reuse Gears queues, workers, scheduling,
 mutexes and storage. Keep reusable agent contracts and execution behavior in
 Agentic so the default agent and Gears composition improve together.
 
+Use the same base agent modules by default. Replace local components where Gears
+infrastructure is the better fit, such as storage and queued execution; add
+scheduling and task coordination explicitly. Avoid parallel implementations of
+context policy, provider handling and tool behavior. Adapters should translate
+host contracts without becoming a second implementation of the shared behavior.
+
 Prioritize foundations before feature breadth: useful and inspectable context
 selection, explicit lifecycle ownership, bounded delegation, honest effect
 outcomes and reliable recovery. UI remains an optional extension. This direction
