@@ -553,3 +553,9 @@ available in compositions that grant `spawn_agent` and its coordination tools.
 The selection is copied into persisted task grants and composition identity;
 the existing execution boundary rejects calls outside the grant. Child grants
 continue to be subsets of their parent's grant.
+
+Delegated objectives are model-authored, pinned task messages. They retain that
+provenance in storage and context; human follow-ups remain human input. Shared
+checkpoint preparation preserves pinned task intent separately from human
+requirements. This revision changes the runtime/context composition identity;
+active trees retain their original composition and are not silently migrated.

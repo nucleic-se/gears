@@ -145,6 +145,7 @@ it('delegates recoverable read context without requiring the model to grant arch
     let childTurns = 0;
     const host = await open(model(async request => {
         if (request.messages[0].content === 'child') {
+            expect(request.messages[0]).toMatchObject({ provenance: 'model', sticky: true });
             expect(request.tools?.map(t => t.name).sort()).toEqual(['read_test', 'read_tool_result']);
             if (childTurns++ === 0) return reply('', [tool('read_test', {}, 'source-a'), tool('read_test', {}, 'source-b')]);
             if (childTurns === 2) {
@@ -168,6 +169,8 @@ it('delegates recoverable read context without requiring the model to grant arch
     const stored = (await host.store.get(tree.id))!;
     const child = stored.tasks[stored.tasks[tree.id].children[0]];
     expect(child.answer).toBe('child verified');
+    expect(child.messages[0]).toMatchObject({ provenance: 'model', sticky: true });
+    expect(stored.tasks[tree.id].messages[0]).toMatchObject({ provenance: 'human', sticky: true });
     expect(child.messages.find(m => m.role === 'tool_result' && m.toolCallId === 'source-a')?.content).toBe(evidence);
     expect(childTurns).toBe(3);
     const { internalAction } = await import('../src/standalone/tools.js');

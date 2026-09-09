@@ -79,7 +79,7 @@ export interface HarnessDatabase {
 }
 export const terminal = (phase: Phase) => ['completed', 'failed', 'unknown', 'cancelled'].includes(phase);
 export function newTask(id: string, objective: string, tools: string[], options: Partial<Task> = {}): Task {
-    return { id, title: objective.slice(0, 80), objective, phase: 'ready', messages: [{ role: 'user', provenance: 'human', content: objective, sticky: true }],
+    return { id, title: objective.slice(0, 80), objective, phase: 'ready', messages: [{ role: 'user', provenance: options.parentId ? 'model' : 'human', content: objective, sticky: true }],
         pending: [], notes: '', children: [], tools, depth: 0, calls: 0, maxCalls: 30, generation: 0, ...options };
 }
 export class Conflict extends Error {

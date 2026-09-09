@@ -72,9 +72,9 @@ export class StandaloneHarness {
         if (options.context && !options.composition) throw new Error('Custom context requires an explicit composition identity');
         return createHarness().compose({
             extensions: [
-                { id: 'runtime.gears', version: '31', apiVersion: 1, configuration: JSON.stringify({ rootTools, projectInstructions: typeof options.projectInstructions === 'function' ? { dynamic: true, composition: options.composition } : options.projectInstructions ?? [], checkpointing: options.checkpointing ?? true, modelTimeoutMs, outputTokens: options.outputTokens ?? 1800, tools: (options.tools ?? []).map(tool => ({ definition: tool.definition, effect: tool.effect })) }), roles: { runtime: () => StandaloneHarness.openRuntime(options) } },
+                { id: 'runtime.gears', version: '32', apiVersion: 1, configuration: JSON.stringify({ rootTools, projectInstructions: typeof options.projectInstructions === 'function' ? { dynamic: true, composition: options.composition } : options.projectInstructions ?? [], checkpointing: options.checkpointing ?? true, modelTimeoutMs, outputTokens: options.outputTokens ?? 1800, tools: (options.tools ?? []).map(tool => ({ definition: tool.definition, effect: tool.effect })) }), roles: { runtime: () => StandaloneHarness.openRuntime(options) } },
                 { id: 'provider.gears', version: '1', apiVersion: 1, roles: { provider: () => options.provider } },
-                { id: 'context.gears', version: '26', apiVersion: 1, configuration: JSON.stringify({ tokens: contextTokens!, custom: options.context ? options.composition : undefined }), roles: { context: () => options.context ?? { ...budgetedContext('', contextTokens!, {
+                { id: 'context.gears', version: '27', apiVersion: 1, configuration: JSON.stringify({ tokens: contextTokens!, custom: options.context ? options.composition : undefined }), roles: { context: () => options.context ?? { ...budgetedContext('', contextTokens!, {
                     includeToolCallIds: (options.tools ?? []).some(tool => tool.definition.name === 'memory_save'),
                     minRecentGroups: 3, // Two recent exchanges plus the transient state message.
                     referenceToolResult: archivedToolResultReference,
