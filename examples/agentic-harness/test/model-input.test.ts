@@ -79,3 +79,29 @@ it('presents refreshed instructions and only relevant scheduling state in actual
         expect(turns).toBe(2);
     } finally { await host.close(); await rm(root, { recursive: true, force: true }); }
 });
+
+it('snapshots root grants, advertises only granted tools and rejects calls outside them', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'root-grants-'));
+    const grants = ['save_progress'];
+    let calls = 0;
+    const host = await StandaloneHarness.open({ dataDir: root, rootTools: grants,
+        provider: { structured: async () => { throw new Error('unused'); }, turn: async request => {
+            expect(request.tools?.map(tool => tool.name)).toEqual(['save_progress']);
+            if (!calls++) return { message: { role: 'assistant', content: '', toolCalls: [{ id: 'denied', name: 'spawn_agent', args: { objective: 'child', tools: [], maxCalls: 1 } }] }, stopReason: 'tool_use', usage: { inputTokens: 1, outputTokens: 1 } };
+            expect(request.messages.some(message => message.role === 'tool_result' && message.isError)).toBe(true);
+            return { message: { role: 'assistant', content: 'done' }, stopReason: 'end_turn', usage: { inputTokens: 1, outputTokens: 1 } };
+        } } });
+    grants.push('spawn_agent');
+    try {
+        const tree = await host.create('task');
+        await expect.poll(async () => (await host.store.get(tree.id))!.tasks[tree.id].answer).toBe('done');
+        const saved = (await host.store.get(tree.id))!;
+        expect(saved.tasks[tree.id].tools).toEqual(['save_progress']);
+        expect(saved.tasks[tree.id].children).toEqual([]);
+    } finally { await host.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+it('rejects unknown root grants before opening resources', async () => {
+    await expect(StandaloneHarness.open({ dataDir: '/unused', rootTools: ['missing'],
+        provider: { structured: async () => { throw new Error('unused'); }, turn: async () => { throw new Error('unused'); } } })).rejects.toThrow('Root tool grant');
+});

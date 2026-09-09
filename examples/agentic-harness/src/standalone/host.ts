@@ -14,6 +14,8 @@ export interface HarnessOptions {
     dataDir: string;
     provider: ILLMProvider;
     tools?: HarnessTool[];
+    /** Tool names granted to new root tasks. Omit to grant all registered tools. */
+    rootTools?: readonly string[];
     projectInstructions?: ProjectInstruction[] | ((messages: readonly Message[], signal: AbortSignal) => Promise<string>);
     composition?: string;
     concurrency?: number;
@@ -59,12 +61,15 @@ export class StandaloneHarness {
         const outputTokens = options.outputTokens ?? 1800;
         if (!Number.isSafeInteger(outputTokens) || outputTokens < 1)
             throw new RangeError('outputTokens must be a positive safe integer');
-        options = { ...options, modelTimeoutMs, outputTokens, projectInstructions: typeof options.projectInstructions === 'function' ? options.projectInstructions : structuredClone(options.projectInstructions ?? []) };
+        const available = [...internalDefinitions.map(tool => tool.name), ...(options.tools ?? []).map(tool => tool.definition.name)];
+        const rootTools = [...new Set(options.rootTools ?? available)];
+        if (rootTools.some(name => !available.includes(name))) throw new Error('Root tool grant names an unavailable tool');
+        options = { ...options, rootTools, modelTimeoutMs, outputTokens, projectInstructions: typeof options.projectInstructions === 'function' ? options.projectInstructions : structuredClone(options.projectInstructions ?? []) };
         if (typeof options.projectInstructions === 'function' && !options.composition) throw new Error('Dynamic project instructions require an explicit composition identity');
         if (options.context && !options.composition) throw new Error('Custom context requires an explicit composition identity');
         return createHarness().compose({
             extensions: [
-                { id: 'runtime.gears', version: '27', apiVersion: 1, configuration: JSON.stringify({ projectInstructions: typeof options.projectInstructions === 'function' ? { dynamic: true, composition: options.composition } : options.projectInstructions ?? [], checkpointing: options.checkpointing ?? true, modelTimeoutMs, outputTokens: options.outputTokens ?? 1800, tools: (options.tools ?? []).map(tool => ({ definition: tool.definition, effect: tool.effect })) }), roles: { runtime: () => StandaloneHarness.openRuntime(options) } },
+                { id: 'runtime.gears', version: '28', apiVersion: 1, configuration: JSON.stringify({ rootTools, projectInstructions: typeof options.projectInstructions === 'function' ? { dynamic: true, composition: options.composition } : options.projectInstructions ?? [], checkpointing: options.checkpointing ?? true, modelTimeoutMs, outputTokens: options.outputTokens ?? 1800, tools: (options.tools ?? []).map(tool => ({ definition: tool.definition, effect: tool.effect })) }), roles: { runtime: () => StandaloneHarness.openRuntime(options) } },
                 { id: 'provider.gears', version: '1', apiVersion: 1, roles: { provider: () => options.provider } },
                 { id: 'context.gears', version: '22', apiVersion: 1, configuration: JSON.stringify({ tokens: options.contextTokens ?? 16000, custom: options.context ? options.composition : undefined }), roles: { context: () => options.context ?? { ...budgetedContext('', options.contextTokens ?? 16000, {
                     includeToolCallIds: (options.tools ?? []).some(tool => tool.definition.name === 'memory_save'),
@@ -189,7 +194,7 @@ export class StandaloneHarness {
     create(objective: string, limits: Partial<Limits> = {}) {
         return this.admitted(async () => {
             await this.assertLease();
-            const tree = await this.store.create(objective, [...internalDefinitions.map(t => t.name), ...this.plugins.keys()], this.compositionId, limits);
+            const tree = await this.store.create(objective, [...this.options.rootTools!], this.compositionId, limits);
             await this.dispatch(tree);
             return tree;
         });

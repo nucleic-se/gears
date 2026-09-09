@@ -516,3 +516,13 @@ The task system prompt states the agent's role and trust boundary. Capability
 instructions belong to tool descriptions: yielding tools declare their required
 last-call position, which the host also enforces. The system does not encourage
 delegation or rely on advice to guarantee completion capacity.
+
+Use `rootTools` to choose the tool names granted to new root tasks from the
+registered internal and custom tools. Omitting it grants all registered tools;
+`[]` creates a root without tools. For example, a read-only single-agent
+composition can grant `['fs_read', 'fs_list', 'search_find', 'search_grep',
+'read_tool_result']` when its coding tools are registered. Delegation remains
+available in compositions that grant `spawn_agent` and its coordination tools.
+The selection is copied into persisted task grants and composition identity;
+the existing execution boundary rejects calls outside the grant. Child grants
+continue to be subsets of their parent's grant.
