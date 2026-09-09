@@ -2,7 +2,7 @@ import type { Kysely } from 'kysely';
 import { randomUUID } from 'node:crypto';
 import { boot, Container, type IQueue } from '@nucleic-se/gears';
 import { DatabaseServiceProvider } from '@nucleic-se/gears/database';
-import { archivedToolResultReference, validateOperationResolution, type OperationResolution, projectInstructionText, projectInstructionTargets, type ProjectInstruction, toToolResultMessage, checkpointContextLifecycle, referenceContextLifecycle, type ContextLifecycle, createHarness, inspectHarness, createHarnessExecution, compositionFingerprint, budgetedContext, type ContextStrategy, type HarnessExecution, type HarnessExecutionRoles, type HarnessExtension } from '@nucleic-se/agentic/harness';
+import { archivedToolResultReference, validateOperationResolution, type OperationResolution, projectInstructionText, projectInstructionTargets, type ProjectInstruction, toToolResultMessage, checkpointContextLifecycle, referenceContextLifecycle, type ContextLifecycle, createHarness, inspectHarness, createHarnessExecution, compositionFingerprint, resolveContextBudget, budgetedContext, type ContextStrategy, type HarnessExecution, type HarnessExecutionRoles, type HarnessExtension } from '@nucleic-se/agentic/harness';
 import { executionSignal } from '@nucleic-se/agentic/runtime';
 import type { ILLMProvider, ToolCall, Message } from '@nucleic-se/agentic/llm';
 import type { IValidatedToolRuntime, ToolCallResult } from '@nucleic-se/agentic/tool-runtime';
@@ -20,6 +20,7 @@ export interface HarnessOptions {
     projectInstructions?: ProjectInstruction[] | ((messages: readonly Message[], signal: AbortSignal) => Promise<string>);
     composition?: string;
     concurrency?: number;
+    /** Optional working cap for the built-in context; custom strategies own their ceilings. */
     contextTokens?: number;
     outputTokens?: number;
     /** Maintain a working checkpoint when budget pressure shortens older history. Default: true. */
@@ -62,17 +63,18 @@ export class StandaloneHarness {
         const outputTokens = options.outputTokens ?? 1800;
         if (!Number.isSafeInteger(outputTokens) || outputTokens < 1)
             throw new RangeError('outputTokens must be a positive safe integer');
+        const contextTokens = options.context ? options.contextTokens : resolveContextBudget(options.provider, options.contextTokens);
         const available = [...internalDefinitions.map(tool => tool.name), ...(options.tools ?? []).map(tool => tool.definition.name)];
         const rootTools = [...new Set(options.rootTools ?? available)];
         if (rootTools.some(name => !available.includes(name))) throw new Error('Root tool grant names an unavailable tool');
-        options = { ...options, rootTools, modelTimeoutMs, outputTokens, projectInstructions: typeof options.projectInstructions === 'function' ? options.projectInstructions : structuredClone(options.projectInstructions ?? []) };
+        options = { ...options, contextTokens, rootTools, modelTimeoutMs, outputTokens, projectInstructions: typeof options.projectInstructions === 'function' ? options.projectInstructions : structuredClone(options.projectInstructions ?? []) };
         if (typeof options.projectInstructions === 'function' && !options.composition) throw new Error('Dynamic project instructions require an explicit composition identity');
         if (options.context && !options.composition) throw new Error('Custom context requires an explicit composition identity');
         return createHarness().compose({
             extensions: [
                 { id: 'runtime.gears', version: '30', apiVersion: 1, configuration: JSON.stringify({ rootTools, projectInstructions: typeof options.projectInstructions === 'function' ? { dynamic: true, composition: options.composition } : options.projectInstructions ?? [], checkpointing: options.checkpointing ?? true, modelTimeoutMs, outputTokens: options.outputTokens ?? 1800, tools: (options.tools ?? []).map(tool => ({ definition: tool.definition, effect: tool.effect })) }), roles: { runtime: () => StandaloneHarness.openRuntime(options) } },
                 { id: 'provider.gears', version: '1', apiVersion: 1, roles: { provider: () => options.provider } },
-                { id: 'context.gears', version: '25', apiVersion: 1, configuration: JSON.stringify({ tokens: options.contextTokens ?? 16000, custom: options.context ? options.composition : undefined }), roles: { context: () => options.context ?? { ...budgetedContext('', options.contextTokens ?? 16000, {
+                { id: 'context.gears', version: '26', apiVersion: 1, configuration: JSON.stringify({ tokens: contextTokens!, custom: options.context ? options.composition : undefined }), roles: { context: () => options.context ?? { ...budgetedContext('', contextTokens!, {
                     includeToolCallIds: (options.tools ?? []).some(tool => tool.definition.name === 'memory_save'),
                     minRecentGroups: 3, // Two recent exchanges plus the transient state message.
                     referenceToolResult: archivedToolResultReference,

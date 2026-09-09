@@ -11,7 +11,7 @@ afterEach(async () => { for (const {host,path} of resources.splice(0)) { await h
 async function fixture() {
     const path = await mkdtemp(join(tmpdir(), 'admission-'));
     const turn = vi.fn(async () => ({ message: {role:'assistant' as const,content:'done'},stopReason:'end_turn' as const,usage:{inputTokens:100,outputTokens:20} }));
-    const host = await StandaloneHarness.open({dataDir:path,provider:{turn,structured:vi.fn()},rootTools:[]});
+    const host = await StandaloneHarness.open({ contextTokens: 16000,dataDir:path,provider:{turn,structured:vi.fn()},rootTools:[]});
     resources.push({host,path});
     const tree = await host.store.create('Answer the question', [], host.compositionId, {tokens:5000});
     await host.store.change(tree.id,'fixture.pending',current => {
@@ -88,7 +88,7 @@ it('recovery wakes admission waits without refunding interrupted model liabiliti
     const f=await fixture(); await f.host.reconcile(); await f.phase('admission');
     const resource=resources.find(r=>r.host===f.host)!;
     await f.host.close();
-    const reopened=await StandaloneHarness.open({dataDir:resource.path,provider:{turn:f.turn,structured:vi.fn()},rootTools:[]});
+    const reopened=await StandaloneHarness.open({ contextTokens: 16000,dataDir:resource.path,provider:{turn:f.turn,structured:vi.fn()},rootTools:[]});
     resource.host=reopened;
     await vi.waitFor(async()=>expect((await reopened.store.get(f.tree.id))!.tasks[f.tree.id].phase).toBe('failed'));
     const recovered=(await reopened.store.get(f.tree.id))!;
@@ -138,7 +138,7 @@ it('does not await cancelled reservations indefinitely after restart',async()=>{
     const f=await fixture();await f.host.reconcile();await f.phase('admission');
     await f.host.cancel(f.tree.id,'pending');
     const resource=resources.find(r=>r.host===f.host)!;await f.host.close();
-    resource.host=await StandaloneHarness.open({dataDir:resource.path,provider:{turn:f.turn,structured:vi.fn()},rootTools:[]});
+    resource.host=await StandaloneHarness.open({ contextTokens: 16000,dataDir:resource.path,provider:{turn:f.turn,structured:vi.fn()},rootTools:[]});
     await vi.waitFor(async()=>expect((await resource.host.store.get(f.tree.id))!.tasks[f.tree.id].phase).toBe('failed'));
     const tree=(await resource.host.store.get(f.tree.id))!;
     expect(tree.tasks.pending.phase).toBe('cancelled');expect(tree.tasks.pending.operationId).toBeUndefined();

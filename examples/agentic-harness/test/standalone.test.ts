@@ -12,7 +12,7 @@ afterEach(async () => { for (const h of hosts.splice(0))
     await h.close(); for (const p of paths.splice(0))
     await rm(p, { recursive: true, force: true }); });
 async function open(provider: ILLMProvider, path?: string, options: Partial<HarnessOptions> = {}) { path ??= await mkdtemp(join(tmpdir(), 'standalone-test-')); if (!paths.includes(path))
-    paths.push(path); const h = await StandaloneHarness.open({ ...options, dataDir: path, provider }); hosts.push(h); return h; }
+    paths.push(path); const h = await StandaloneHarness.open({ contextTokens: 16000, ...options, dataDir: path, provider }); hosts.push(h); return h; }
 const reply = (content: string, calls: ToolCall[] = []): TurnResponse => ({ message: { role: 'assistant', content, ...(calls.length ? { toolCalls: calls } : {}) }, stopReason: calls.length ? 'tool_use' : 'end_turn', usage: { inputTokens: 100, outputTokens: 20 } });
 const tool = (name: string, args: Record<string, unknown>, id = name): ToolCall => ({ id, name, args });
 const model = (turn: ILLMProvider['turn']): ILLMProvider => ({ turn, structured: async () => { throw new Error('unused'); } });
@@ -34,7 +34,7 @@ it('snapshots project instructions into the exact task request and composition i
 it.each([0, -1, 1.5, NaN, Infinity])('rejects invalid output allowance %s before opening storage', async outputTokens => {
     const path = await mkdtemp(join(tmpdir(), 'invalid-output-')); paths.push(path);
     const provider = model(vi.fn());
-    await expect(StandaloneHarness.open({ dataDir: path, provider, outputTokens })).rejects.toThrow('outputTokens must be a positive safe integer');
+    await expect(StandaloneHarness.open({ contextTokens: 16000, dataDir: path, provider, outputTokens })).rejects.toThrow('outputTokens must be a positive safe integer');
     const host = await open(provider, path);
     expect(await host.store.list()).toEqual([]);
     expect(provider.turn).not.toHaveBeenCalled();
@@ -275,7 +275,7 @@ it('treats a denied read-only tool as recoverable model feedback', async () => {
     const path = await mkdtemp(join(tmpdir(), 'standalone-test-'));
     paths.push(path);
     const provider = model(async (request) => request.messages.some(m => m.role === 'tool_result') ? reply('recovered') : reply('', [tool('read_test', {})]));
-    const h = await StandaloneHarness.open({ dataDir: path, provider, tools: [{ effect: 'read', definition: { name: 'read_test', description: 'Read test', parameters: { type: 'object' } }, validate: args => args, execute: async () => { throw new Error('Path denied'); } }] });
+    const h = await StandaloneHarness.open({ contextTokens: 16000, dataDir: path, provider, tools: [{ effect: 'read', definition: { name: 'read_test', description: 'Read test', parameters: { type: 'object' } }, validate: args => args, execute: async () => { throw new Error('Path denied'); } }] });
     hosts.push(h);
     const tree = await h.create('read');
     await state(h, tree.id, t => expect(t.tasks[t.id].answer).toBe('recovered'));
@@ -284,7 +284,7 @@ it('never replays an uncertain effectful extension', async () => {
     const path = await mkdtemp(join(tmpdir(), 'standalone-test-'));
     paths.push(path);
     const execute = vi.fn(async () => { throw new Error('ack lost'); });
-    const h = await StandaloneHarness.open({ dataDir: path, provider: model(async () => reply('', [tool('write_test', {})])), tools: [{ effect: 'write', definition: { name: 'write_test', description: 'Write test', parameters: { type: 'object' } }, validate: args => args, execute }] });
+    const h = await StandaloneHarness.open({ contextTokens: 16000, dataDir: path, provider: model(async () => reply('', [tool('write_test', {})])), tools: [{ effect: 'write', definition: { name: 'write_test', description: 'Write test', parameters: { type: 'object' } }, validate: args => args, execute }] });
     hosts.push(h);
     const tree = await h.create('write');
     await state(h, tree.id, t => expect(t.tasks[t.id].phase).toBe('unknown'));
@@ -725,7 +725,7 @@ it.each([{ suffix: [0xff] }, { suffix: [0xe2, 0x82] }, { suffix: [0xc0, 0xaf] }]
 
 
 it.each([0, -1, 1.5, NaN, Infinity, 2147453648])('rejects invalid model timeout %s before opening resources', async modelTimeoutMs => {
-    await expect(StandaloneHarness.open({ dataDir: '/unused', provider: model(async () => reply('unused')), modelTimeoutMs })).rejects.toThrow('modelTimeoutMs');
+    await expect(StandaloneHarness.open({ contextTokens: 16000, dataDir: '/unused', provider: model(async () => reply('unused')), modelTimeoutMs })).rejects.toThrow('modelTimeoutMs');
 });
 it('derives queue headroom, records deadlines and runs tools in a separate queue step', async () => {
     const turn = vi.fn(async (request: TurnRequest) => request.messages.some(m => m.role === 'tool_result') ? reply('done') : reply('', [tool('save_progress', { notes: 'saved' })]));

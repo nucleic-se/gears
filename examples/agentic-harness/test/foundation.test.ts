@@ -8,7 +8,7 @@ import { terminal } from '../src/standalone/state.js';
 
 it('ownership claims persist the transition timestamp with their event', async () => {
     const dataDir = await mkdtemp(join(tmpdir(), 'gears-claim-'));
-    const host = await StandaloneHarness.open({ dataDir, provider: { turn: vi.fn(), structured: vi.fn() } });
+    const host = await StandaloneHarness.open({ contextTokens: 16000, dataDir, provider: { turn: vi.fn(), structured: vi.fn() } });
     try {
         const tree = await host.store.create('unstarted', [], host.compositionId);
         const timestamp = tree.updatedAt + 1000;
@@ -39,10 +39,10 @@ it('composition activation failure releases the Gears host so the same directory
     const dataDir = await mkdtemp(join(tmpdir(), 'gears-foundation-'));
     const provider = { turn: vi.fn(), structured: vi.fn() };
     try {
-        await expect(StandaloneHarness.open({ dataDir, provider, extensions: [
+        await expect(StandaloneHarness.open({ contextTokens: 16000, dataDir, provider, extensions: [
             { id: 'broken', version: '1', apiVersion: 1, activate: async () => { throw new Error('activation failed'); } },
         ] })).rejects.toThrow('activation failed');
-        const host = await StandaloneHarness.open({ dataDir, provider });
+        const host = await StandaloneHarness.open({ contextTokens: 16000, dataDir, provider });
         await host.close();
         expect(provider.turn).not.toHaveBeenCalled();
     } finally { await rm(dataDir, { recursive: true, force: true }); }
@@ -51,7 +51,7 @@ it('composition activation failure releases the Gears host so the same directory
 it('context configuration changes invalidate resumable work before it is claimed', async () => {
     const dataDir = await mkdtemp(join(tmpdir(), 'gears-foundation-'));
     const provider = { turn: vi.fn(), structured: vi.fn() };
-    const first = await StandaloneHarness.open({ dataDir, provider });
+    const first = await StandaloneHarness.open({ contextTokens: 16000, dataDir, provider });
     try {
         await first.store.create('preserve input', [], first.compositionId);
         await first.close();
@@ -67,7 +67,7 @@ it('shutdown closes admission, drains accepted commands and disposes extensions 
     const gate = new Promise<void>(resolve => { release = resolve; });
     const started = new Promise<void>(resolve => { entered = resolve; });
     let storedAtCleanup = 0;
-    const host = await StandaloneHarness.open({ dataDir, provider, extensions: [{ id: 'observer', version: '1', apiVersion: 1,
+    const host = await StandaloneHarness.open({ contextTokens: 16000, dataDir, provider, extensions: [{ id: 'observer', version: '1', apiVersion: 1,
         activate: async client => async () => { storedAtCleanup = (await client.store.list()).length; },
     }] });
     const create = host.store.create.bind(host.store);

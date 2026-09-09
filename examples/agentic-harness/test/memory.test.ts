@@ -32,7 +32,7 @@ it('uses shared note capture and recalls source evidence in another task after r
     let host: StandaloneHarness | undefined, memory: SqliteMemoryStore | undefined;
     const open = async () => {
         memory = await SqliteMemoryStore.open(join(root, 'notes.sqlite'), root);
-        host = await StandaloneHarness.open({ dataDir: root, provider, tools: [
+        host = await StandaloneHarness.open({ contextTokens: 16000, dataDir: root, provider, tools: [
             { definition: { name: 'read_build', description: 'Read recorded build instructions', parameters: { type: 'object', properties: {} } },
                 effect: 'read', validate: args => args, execute: async () => ({ ok: true, content: 'Use npm run verify\n' + 'x'.repeat(8500) + '\noriginal tail' }) },
             ...memoryTools(memory, () => host!),
@@ -69,7 +69,7 @@ it.each([true, false])('recalls exact operator resolution after reopen without c
     const open = async () => {
         memory = await SqliteMemoryStore.open(join(root, 'notes.sqlite'), root);
         const notes = memoryTools(memory, () => host!);
-        host = await StandaloneHarness.open({ dataDir: root, provider, tools: [
+        host = await StandaloneHarness.open({ contextTokens: 16000, dataDir: root, provider, tools: [
             { definition: { name: 'write', description: '', parameters: { type: 'object', properties: {} } }, effect: 'write',
                 validate: args => args, execute: async () => { dispatches++; return { ok: false, content: 'Uncertain original', errorKind: 'unknown' }; } }, ...notes,
         ] });

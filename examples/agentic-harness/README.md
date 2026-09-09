@@ -91,6 +91,13 @@ needs its chosen authorization/approval policy before registration.
 `context` uses Agentic's `ContextStrategy` contract, replacing the old
 `composeContext` callback. A custom context needs an explicit non-secret
 `composition` identity and a consistent usage report for durable token admission.
+The built-in strategy resolves its ceiling from the provider's advertised model
+capacity through Agentic's `resolveContextBudget`. `contextTokens` can impose a
+smaller working cap; an unknown provider needs an explicit value. The resolved
+ceiling is fingerprinted. This does not increase the tree's spending, call or
+time limits. Custom context strategies own their context policy; `contextTokens` does not
+constrain them. They still must supply consistent accounting.
+
 The built-in strategy is Agentic's `budgetedContext`; its report and final request
 pass through the same boundary as the local Agentic agent.
 
