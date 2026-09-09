@@ -26,7 +26,7 @@ it('advertises and validates the same limits, reference alternatives and artifac
 
 it('pages complete child answers without exposing unrelated tasks or losing their tails', async () => {
     const root = await mkdtemp(join(tmpdir(), 'child-answer-'));
-    const host = await StandaloneHarness.open({ contextTokens: 16000, dataDir: root, provider: { structured: async () => { throw new Error('unused'); }, turn: async () => ({ message: { role: 'assistant', content: 'done' }, stopReason: 'end_turn', usage: { inputTokens: 1, outputTokens: 1 } }) } });
+    const host = await StandaloneHarness.open({ contextTokens: 16000, dataDir: root, provider: { configurationIdentity: 'test-provider', structured: async () => { throw new Error('unused'); }, turn: async () => ({ message: { role: 'assistant', content: 'done' }, stopReason: 'end_turn', usage: { inputTokens: 1, outputTokens: 1 } }) } });
     try {
         const tree = await host.store.create('parent', internalDefinitions.map(t => t.name), host.compositionId);
         const answer = 'evidence '.repeat(3000) + 'CRITICAL_FINAL_CONCLUSION';
@@ -64,7 +64,7 @@ it('presents refreshed instructions and only relevant scheduling state in actual
     let text = 'FIRST_INSTRUCTION', turns = 0;
     const host = await StandaloneHarness.open({ contextTokens: 16000, dataDir: root, composition: 'instruction-test',
         projectInstructions: async (_messages, signal) => { signal.throwIfAborted(); return '\n' + text; },
-        provider: { structured: async () => { throw new Error('unused'); }, turn: async request => {
+        provider: { configurationIdentity: 'test-provider', structured: async () => { throw new Error('unused'); }, turn: async request => {
             expect(request.system).toContain(turns ? 'UPDATED_INSTRUCTION' : 'FIRST_INSTRUCTION');
             const state = JSON.parse(request.messages[request.messages.length - 1].content.split('\n').slice(1).join('\n'));
             expect(Date.parse(state.expiresAt)).toBeGreaterThan(Date.now());
@@ -85,7 +85,7 @@ it('snapshots root grants, advertises only granted tools and rejects calls outsi
     const grants = ['save_progress'];
     let calls = 0;
     const host = await StandaloneHarness.open({ contextTokens: 16000, dataDir: root, rootTools: grants,
-        provider: { structured: async () => { throw new Error('unused'); }, turn: async request => {
+        provider: { configurationIdentity: 'test-provider', structured: async () => { throw new Error('unused'); }, turn: async request => {
             expect(request.tools?.map(tool => tool.name)).toEqual(['save_progress']);
             if (!calls++) return { message: { role: 'assistant', content: '', toolCalls: [{ id: 'denied', name: 'spawn_agent', args: { objective: 'child', tools: [], maxCalls: 1 } }] }, stopReason: 'tool_use', usage: { inputTokens: 1, outputTokens: 1 } };
             expect(request.messages.some(message => message.role === 'tool_result' && message.isError)).toBe(true);
@@ -103,5 +103,5 @@ it('snapshots root grants, advertises only granted tools and rejects calls outsi
 
 it('rejects unknown root grants before opening resources', async () => {
     await expect(StandaloneHarness.open({ contextTokens: 16000, dataDir: '/unused', rootTools: ['missing'],
-        provider: { structured: async () => { throw new Error('unused'); }, turn: async () => { throw new Error('unused'); } } })).rejects.toThrow('Root tool grant');
+        provider: { configurationIdentity: 'test-provider', structured: async () => { throw new Error('unused'); }, turn: async () => { throw new Error('unused'); } } })).rejects.toThrow('Root tool grant');
 });

@@ -6,7 +6,7 @@ import type { ILLMProvider } from '@nucleic-se/agentic/llm';
 import { StandaloneHarness } from '../src/standalone/host.js';
 
 function provider(): ILLMProvider {
-    return { turn: vi.fn(), structured: vi.fn(), capabilities: {
+    return { configurationIdentity: 'test-provider', turn: vi.fn(), structured: vi.fn(), capabilities: {
         contextWindowTokens: 50000, transport: 'test', toolBatching: true,
         outputLimit: 'enforced', automaticRetries: 0, continuation: 'none', requestObservation: 'none',
     } };
@@ -33,7 +33,7 @@ it('resolves and fingerprints model capacity before opening the durable composit
 it('requires explicit capacity for an unknown provider before opening storage', async () => {
     const path = await mkdtemp(join(tmpdir(), 'unknown-capacity-'));
     const dataDir = join(path, 'unopened');
-    const model = { turn: vi.fn(), structured: vi.fn() };
+    const model = { configurationIdentity: 'test-provider', turn: vi.fn(), structured: vi.fn() };
     try {
         await expect(StandaloneHarness.open({ dataDir, provider: model })).rejects.toThrow('capacity is unknown');
         await expect(access(dataDir)).rejects.toThrow();

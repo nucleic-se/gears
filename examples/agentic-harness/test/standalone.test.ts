@@ -15,7 +15,7 @@ async function open(provider: ILLMProvider, path?: string, options: Partial<Harn
     paths.push(path); const h = await StandaloneHarness.open({ contextTokens: 16000, ...options, dataDir: path, provider }); hosts.push(h); return h; }
 const reply = (content: string, calls: ToolCall[] = []): TurnResponse => ({ message: { role: 'assistant', content, ...(calls.length ? { toolCalls: calls } : {}) }, stopReason: calls.length ? 'tool_use' : 'end_turn', usage: { inputTokens: 100, outputTokens: 20 } });
 const tool = (name: string, args: Record<string, unknown>, id = name): ToolCall => ({ id, name, args });
-const model = (turn: ILLMProvider['turn']): ILLMProvider => ({ turn, structured: async () => { throw new Error('unused'); } });
+const model = (turn: ILLMProvider['turn']): ILLMProvider => ({ configurationIdentity: 'test-provider', turn, structured: async () => { throw new Error('unused'); } });
 async function state(host: StandaloneHarness, id: string, check: (t: Tree) => void) { await vi.waitFor(async () => check((await host.store.get(id))!), { timeout: 10000, interval: 20 }); }
 it('snapshots project instructions into the exact task request and composition identity', async () => {
     const instructions = [{ path: 'AGENTS.md', directory: '.', content: 'Run node --test before completion.' }];

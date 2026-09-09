@@ -64,6 +64,13 @@ export class StandaloneHarness {
         if (!Number.isSafeInteger(outputTokens) || outputTokens < 1)
             throw new RangeError('outputTokens must be a positive safe integer');
         const contextTokens = options.context ? options.contextTokens : resolveContextBudget(options.provider, options.contextTokens);
+        const providerIdentity = options.provider.configurationIdentity;
+        if (providerIdentity !== undefined && (typeof providerIdentity !== 'string' || !providerIdentity.trim()))
+            throw new Error('Provider configuration identity must be nonempty text');
+        if (options.composition !== undefined && (typeof options.composition !== 'string' || !options.composition.trim()))
+            throw new Error('Composition identity must be nonempty text');
+        if (providerIdentity === undefined && options.composition === undefined)
+            throw new Error('Provider configuration identity is unknown; supply an explicit composition identity');
         const available = [...internalDefinitions.map(tool => tool.name), ...(options.tools ?? []).map(tool => tool.definition.name)];
         const rootTools = [...new Set(options.rootTools ?? available)];
         if (rootTools.some(name => !available.includes(name))) throw new Error('Root tool grant names an unavailable tool');
@@ -73,7 +80,7 @@ export class StandaloneHarness {
         return createHarness().compose({
             extensions: [
                 { id: 'runtime.gears', version: '32', apiVersion: 1, configuration: JSON.stringify({ rootTools, projectInstructions: typeof options.projectInstructions === 'function' ? { dynamic: true, composition: options.composition } : options.projectInstructions ?? [], checkpointing: options.checkpointing ?? true, modelTimeoutMs, outputTokens: options.outputTokens ?? 1800, tools: (options.tools ?? []).map(tool => ({ definition: tool.definition, effect: tool.effect })) }), roles: { runtime: () => StandaloneHarness.openRuntime(options) } },
-                { id: 'provider.gears', version: '1', apiVersion: 1, roles: { provider: () => options.provider } },
+                { id: 'provider.gears', version: '2', apiVersion: 1, configuration: providerIdentity, roles: { provider: () => options.provider } },
                 { id: 'context.gears', version: '27', apiVersion: 1, configuration: JSON.stringify({ tokens: contextTokens!, custom: options.context ? options.composition : undefined }), roles: { context: () => options.context ?? { ...budgetedContext('', contextTokens!, {
                     includeToolCallIds: (options.tools ?? []).some(tool => tool.definition.name === 'memory_save'),
                     minRecentGroups: 3, // Two recent exchanges plus the transient state message.

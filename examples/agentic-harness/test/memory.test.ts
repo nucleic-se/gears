@@ -12,7 +12,7 @@ it('uses shared note capture and recalls source evidence in another task after r
     const reply = (calls: ToolCall[] = []) => ({ message: { role: 'assistant' as const, content: calls.length ? '' : 'done', toolCalls: calls },
         stopReason: calls.length ? 'tool_use' as const : 'end_turn' as const, usage: { inputTokens: 1, outputTokens: 1 } });
     let learning = true;
-    const provider: ILLMProvider = { structured: async () => { throw new Error('unused'); }, turn: async request => {
+    const provider: ILLMProvider = { configurationIdentity: 'test-provider', structured: async () => { throw new Error('unused'); }, turn: async request => {
         const results = request.messages.filter(message => message.role === 'tool_result');
         if (learning) return results.length ? reply() : reply([
             { id: 'source', name: 'read_build', args: {} },
@@ -62,7 +62,7 @@ it('uses shared note capture and recalls source evidence in another task after r
 it.each([true, false])('recalls exact operator resolution after reopen without changing original receipts (ok=%s)', async ok => {
     const root = await mkdtemp(join(tmpdir(), 'gears-resolution-'));
     let host: StandaloneHarness | undefined, memory: SqliteMemoryStore | undefined, dispatches = 0;
-    const provider: ILLMProvider = { structured: async () => { throw new Error('unused'); }, turn: async () => ({
+    const provider: ILLMProvider = { configurationIdentity: 'test-provider', structured: async () => { throw new Error('unused'); }, turn: async () => ({
         message: { role: 'assistant', content: '', toolCalls: [{ id: 'effect', name: 'write', args: {} }] },
         stopReason: 'tool_use', usage: { inputTokens: 1, outputTokens: 1 },
     }) };

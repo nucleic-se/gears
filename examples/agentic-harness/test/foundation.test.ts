@@ -8,7 +8,7 @@ import { terminal } from '../src/standalone/state.js';
 
 it('ownership claims persist the transition timestamp with their event', async () => {
     const dataDir = await mkdtemp(join(tmpdir(), 'gears-claim-'));
-    const host = await StandaloneHarness.open({ contextTokens: 16000, dataDir, provider: { turn: vi.fn(), structured: vi.fn() } });
+    const host = await StandaloneHarness.open({ contextTokens: 16000, dataDir, provider: { configurationIdentity: 'test-provider', turn: vi.fn(), structured: vi.fn() } });
     try {
         const tree = await host.store.create('unstarted', [], host.compositionId);
         const timestamp = tree.updatedAt + 1000;
@@ -37,7 +37,7 @@ it('the queued Gears composition satisfies the same request boundary as the loca
 
 it('composition activation failure releases the Gears host so the same directory can reopen', async () => {
     const dataDir = await mkdtemp(join(tmpdir(), 'gears-foundation-'));
-    const provider = { turn: vi.fn(), structured: vi.fn() };
+    const provider = { configurationIdentity: 'test-provider', turn: vi.fn(), structured: vi.fn() };
     try {
         await expect(StandaloneHarness.open({ contextTokens: 16000, dataDir, provider, extensions: [
             { id: 'broken', version: '1', apiVersion: 1, activate: async () => { throw new Error('activation failed'); } },
@@ -50,7 +50,7 @@ it('composition activation failure releases the Gears host so the same directory
 
 it('context configuration changes invalidate resumable work before it is claimed', async () => {
     const dataDir = await mkdtemp(join(tmpdir(), 'gears-foundation-'));
-    const provider = { turn: vi.fn(), structured: vi.fn() };
+    const provider = { configurationIdentity: 'test-provider', turn: vi.fn(), structured: vi.fn() };
     const first = await StandaloneHarness.open({ contextTokens: 16000, dataDir, provider });
     try {
         await first.store.create('preserve input', [], first.compositionId);
@@ -62,7 +62,7 @@ it('context configuration changes invalidate resumable work before it is claimed
 
 it('shutdown closes admission, drains accepted commands and disposes extensions before storage', async () => {
     const dataDir = await mkdtemp(join(tmpdir(), 'gears-foundation-'));
-    const provider = { turn: vi.fn(), structured: vi.fn() };
+    const provider = { configurationIdentity: 'test-provider', turn: vi.fn(), structured: vi.fn() };
     let release!: () => void, entered!: () => void;
     const gate = new Promise<void>(resolve => { release = resolve; });
     const started = new Promise<void>(resolve => { entered = resolve; });

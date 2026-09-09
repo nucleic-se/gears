@@ -113,8 +113,17 @@ identity. Old active trees with the previous identity are rejected before recove
 changes them. Use a fresh data directory for this revision, or finish old work
 using the previous revision. No automatic migration or silent reset is performed.
 Changing the context ceiling, output cap or registered tool manifest also changes
-the fingerprint. The CLI additionally includes its model choice. The public
+the fingerprint. Declared provider configuration is also fingerprinted. The public
 `compositionId` is the identity to use when constructing a tree through the store.
+
+Providers may declare a stable, non-secret `configurationIdentity` through the
+Agentic provider contract. Gears snapshots it into the provider role before opening
+resources. A changed declared identity rejects active-tree recovery and completed
+tree continuation even if the caller reuses the same `composition` label.
+The subscription provider includes model, endpoint and effective reasoning effort.
+For a provider without this metadata, `composition` is required and the caller
+must change it when provider behavior changes. Credentials and opaque callbacks
+are not introspected; identify custom behavioral overrides in that label too.
 
 Change the explicit `composition` identifier when changing persisted execution
 semantics. Startup refuses incompatible active tasks without changing their execution
