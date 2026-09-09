@@ -10,17 +10,19 @@ function liveReservations(tree: Tree) {
     return Object.values(tree.tasks).filter(task => (task.phase === 'model' || task.phase === 'cancelled') && task.operationId && (task.reservation ?? 0) > 0);
 }
 
-export function preparationCapacity(tree: Tree): number {
+export function preparationCapacity(tree: Tree): number | undefined {
+    if (tree.limits.tokens === undefined) return undefined;
     return Math.max(0, tree.limits.tokens - tree.chargedTokens + liveReservations(tree).reduce((sum, task) => sum + task.reservation!, 0));
 }
 
 /** Existing charges remain authoritative; only live reservations might release capacity. */
 export function admissionWait(tree: Tree, requiredTokens: number): string[] | undefined {
+    if (tree.limits.tokens === undefined) return undefined;
     const available = Math.max(0, tree.limits.tokens - tree.chargedTokens);
     if (requiredTokens <= available) return undefined;
     const pending = liveReservations(tree);
     // Include overspent liabilities instead of clamping them away.
-    if (requiredTokens <= preparationCapacity(tree))
+    if (requiredTokens <= preparationCapacity(tree)!)
         return pending.map(task => task.operationId!);
     throw new Error(`Shared token budget exhausted: request needs ${requiredTokens}, remaining ${available}`);
 }

@@ -158,3 +158,33 @@ it('counts only releasable live reservations when bounding preparation', async (
     await f.host.store.change(f.tree.id, 'fixture.overspent', tree => { tree.chargedTokens = 6000; });
     expect(preparationCapacity(await f.read())).toBe(0);
 });
+
+it('keeps the configured context and accounts usage without an implicit spending allowance', async () => {
+    const path = await mkdtemp(join(tmpdir(), 'uncapped-admission-'));
+    const turn = vi.fn(async () => ({ message: { role: 'assistant' as const, content: 'done' }, stopReason: 'end_turn' as const, usage: { inputTokens: 100, outputTokens: 20 } }));
+    const host = await StandaloneHarness.open({ dataDir: path, provider: { turn, structured: vi.fn() }, contextTokens: 16000, rootTools: [] });
+    resources.push({ host, path });
+    const tree = await host.store.create('Finish the task', [], host.compositionId);
+    await host.store.change(tree.id, 'fixture.previous-usage', current => {
+        current.chargedTokens = 300000;
+        current.usage = { inputTokens: 300000, outputTokens: 0 };
+    });
+    await host.reconcile();
+    await vi.waitFor(async () => expect((await host.store.get(tree.id))!.tasks[tree.id].phase).toBe('completed'));
+    const saved = (await host.store.get(tree.id))!;
+    expect(saved.limits).not.toHaveProperty('tokens');
+    expect(saved.chargedTokens).toBe(300120);
+    expect(saved.usage).toEqual({ inputTokens: 300100, outputTokens: 20 });
+    expect(turn).toHaveBeenCalledTimes(1);
+    const intent = (await host.store.events(tree.id)).find(event => event.type === 'model.intent')!;
+    expect(intent.data).toMatchObject({ context: { tokenBudget: 16000 } });
+    expect(JSON.stringify(intent.data)).not.toContain('remainingSharedTokensBeforeThisRequest');
+});
+
+it('does not turn outstanding liabilities into an implicit limit when spending is uncapped', () => {
+    const tree = { limits: {}, chargedTokens: 300000, tasks: { pending: { phase: 'unknown', reservation: 300000 } } } as unknown as Tree;
+    const before = structuredClone(tree);
+    expect(preparationCapacity(tree)).toBeUndefined();
+    expect(admissionWait(tree, 50000)).toBeUndefined();
+    expect(tree).toEqual(before);
+});

@@ -627,7 +627,7 @@ it('keeps instructions stable and projects fresh budget state without accumulati
             ? reply('', [tool('save_progress', { notes: 'Keep the source reference for the final answer.' })])
             : reply('done');
     }));
-    const tree = await h.create('stable objective');
+    const tree = await h.create('stable objective', { tokens: 200000 });
     await state(h, tree.id, current => expect(current.tasks[tree.id].phase).toBe('completed'));
     expect(requests).toHaveLength(2);
     expect(requests[0].system).toBe(requests[1].system);
@@ -638,7 +638,7 @@ it('keeps instructions stable and projects fresh budget state without accumulati
     const first = JSON.parse(stateMessage(requests[0])[0].content.split('\n')[1]);
     const second = JSON.parse(stateMessage(requests[1])[0].content.split('\n')[1]);
     expect(first.remainingSharedTokensBeforeThisRequest).toBe(tree.limits.tokens);
-    expect(second.remainingSharedTokensBeforeThisRequest).toBe(tree.limits.tokens - 120);
+    expect(second.remainingSharedTokensBeforeThisRequest).toBe(tree.limits.tokens! - 120);
     expect(second.remainingTaskCallsIncludingThisTurn).toBe(first.remainingTaskCallsIncludingThisTurn - 1);
     expect(second.progressNotes).toBe('Keep the source reference for the final answer.');
     const persisted = (await h.store.get(tree.id))!;

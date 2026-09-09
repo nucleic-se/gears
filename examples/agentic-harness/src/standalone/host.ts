@@ -72,7 +72,7 @@ export class StandaloneHarness {
         if (options.context && !options.composition) throw new Error('Custom context requires an explicit composition identity');
         return createHarness().compose({
             extensions: [
-                { id: 'runtime.gears', version: '30', apiVersion: 1, configuration: JSON.stringify({ rootTools, projectInstructions: typeof options.projectInstructions === 'function' ? { dynamic: true, composition: options.composition } : options.projectInstructions ?? [], checkpointing: options.checkpointing ?? true, modelTimeoutMs, outputTokens: options.outputTokens ?? 1800, tools: (options.tools ?? []).map(tool => ({ definition: tool.definition, effect: tool.effect })) }), roles: { runtime: () => StandaloneHarness.openRuntime(options) } },
+                { id: 'runtime.gears', version: '31', apiVersion: 1, configuration: JSON.stringify({ rootTools, projectInstructions: typeof options.projectInstructions === 'function' ? { dynamic: true, composition: options.composition } : options.projectInstructions ?? [], checkpointing: options.checkpointing ?? true, modelTimeoutMs, outputTokens: options.outputTokens ?? 1800, tools: (options.tools ?? []).map(tool => ({ definition: tool.definition, effect: tool.effect })) }), roles: { runtime: () => StandaloneHarness.openRuntime(options) } },
                 { id: 'provider.gears', version: '1', apiVersion: 1, roles: { provider: () => options.provider } },
                 { id: 'context.gears', version: '26', apiVersion: 1, configuration: JSON.stringify({ tokens: contextTokens!, custom: options.context ? options.composition : undefined }), roles: { context: () => options.context ?? { ...budgetedContext('', contextTokens!, {
                     includeToolCallIds: (options.tools ?? []).some(tool => tool.definition.name === 'memory_save'),
@@ -393,7 +393,7 @@ export class StandaloneHarness {
                         task.admissionWait = operations ? { requiredTokens: deferred.requiredTokens, operationIds: operations, inboxSize: task.inbox?.length ?? 0 } : undefined;
                         task.phase = operations ? 'admission' : 'ready';
                         task.generation++;
-                        Object.assign(data, { availableTokens: tree.limits.tokens - tree.chargedTokens, operationIds: operations ?? [] });
+                        Object.assign(data, { availableTokens: tree.limits.tokens === undefined ? undefined : tree.limits.tokens - tree.chargedTokens, operationIds: operations ?? [] });
                     }, taskId, data);
                     return;
                 } catch (settlementError) { error = settlementError; }
@@ -423,7 +423,7 @@ export class StandaloneHarness {
         if (definitions.length !== task.tools.length)
             throw new Error('A configured tool is unavailable');
         const contextTokenBudget = preparationCapacity(tree);
-        if (contextTokenBudget < 1) throw new Error('Shared token budget exhausted: no capacity remains');
+        if (contextTokenBudget !== undefined && contextTokenBudget < 1) throw new Error('Shared token budget exhausted: no capacity remains');
         const outputTokens = this.options.outputTokens ?? 1800;
         const messages = [...task.messages, ...(task.inbox ?? [])];
         const instructions = typeof this.options.projectInstructions === 'function'
@@ -435,7 +435,7 @@ export class StandaloneHarness {
                 taskId: task.id, parentId: task.parentId ?? null,
                 remainingTaskCallsIncludingThisTurn: task.maxCalls - task.calls,
                 remainingSharedCallsIncludingThisTurn: tree.limits.modelCalls - tree.modelCalls,
-                remainingSharedTokensBeforeThisRequest: Math.max(0, tree.limits.tokens - tree.chargedTokens),
+                ...(tree.limits.tokens === undefined ? {} : { remainingSharedTokensBeforeThisRequest: Math.max(0, tree.limits.tokens - tree.chargedTokens) }),
                 ...((task.tools.includes('schedule_self') || task.tools.includes('spawn_agent')) ? { expiresAt: new Date(tree.limits.expiresAt).toISOString() } : {}),
                 ...(task.tools.includes('spawn_agent') ? { remainingChildren: Math.max(0, tree.limits.children - Object.keys(tree.tasks).length + 1),
                     remainingDepth: Math.max(0, tree.limits.depth - task.depth) } : {}),
@@ -452,7 +452,7 @@ export class StandaloneHarness {
             const requested = options?.contextTokenBudget;
             if (requested !== undefined && (!Number.isSafeInteger(requested) || requested < 1))
                 throw new RangeError('contextTokenBudget must be a positive safe integer');
-            return this.execution.prepareModel(request, { ...options, signal, deadline, contextTokenBudget: Math.min(contextTokenBudget, requested ?? contextTokenBudget) });
+            return this.execution.prepareModel(request, { ...options, signal, deadline, contextTokenBudget: contextTokenBudget === undefined ? requested : Math.min(contextTokenBudget, requested ?? contextTokenBudget) });
         } });
         const prepared = step.prepared;
         const contextReport = prepared.report;

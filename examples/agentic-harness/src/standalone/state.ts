@@ -37,7 +37,8 @@ export interface Task {
 }
 export interface Limits {
     modelCalls: number;
-    tokens: number;
+    /** Optional cumulative input/output allowance shared by the task tree. */
+    tokens?: number;
     children: number;
     depth: number;
     expiresAt: number;
@@ -102,9 +103,9 @@ export class TreeStore implements ExecutionJournal<Tree, TreeEvent> {
         if (!objective.trim() || objective.length > 32000)
             throw new Error('Objective must contain 1–32000 characters');
         const id = randomUUID(), now = Date.now();
-        const resolved = { modelCalls: 60, tokens: 200000, children: 8, depth: 2, expiresAt: now + 86400000, ...limits };
-        for (const value of Object.values(resolved))
-            if (!Number.isSafeInteger(value) || value < 1)
+        const resolved: Limits = { modelCalls: 60, children: 8, depth: 2, expiresAt: now + 86400000, ...limits };
+        for (const [name, value] of Object.entries(resolved))
+            if (!(name === 'tokens' && value === undefined) && (!Number.isSafeInteger(value) || value < 1))
                 throw new Error('Limits must be positive integers');
         if (resolved.children > 32 || resolved.depth > 5 || resolved.modelCalls > 1000 || resolved.expiresAt <= now)
             throw new Error('Limits exceed supported bounds');

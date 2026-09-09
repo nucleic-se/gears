@@ -161,13 +161,17 @@ receipt is marked `unknown`; it is never silently replayed. Inspect events and
 start new work with the evidence. This version does not provide an operation
 resolution UI. Cancellation is best effort and cannot undo an external effect.
 
-Default tree limits: 60 model calls, 200,000 tokens for admission, eight children,
-two delegation levels, and 24-hour expiry. Each task also has an individual call
-limit. Model calls reserve estimated input plus maximum output atomically across
+Default tree limits: 60 model calls, eight children, two delegation levels, and
+24-hour expiry. Each task also has an individual call limit. Cumulative token
+spending is uncapped unless `create(objective, { tokens })` specifies an allowance.
+Model context capacity is independent of cumulative spending. Usage and unresolved
+reservations are recorded with or without an allowance.
+Model calls reserve estimated input plus maximum output atomically across
 children, then reconcile reported usage. The bundled subscription OAuth transport
 removes the requested output cap, so its output reservation is a planning allowance.
 Token estimation is not a billing cap:
-a provider can report higher usage, which blocks subsequent admission. Unknown
+a provider can report higher usage, which can block subsequent admission when an
+explicit allowance is exhausted. Unknown
 requests keep their reservation; definitively undispatched requests release it.
 When live model reservations could release enough capacity for a pending request,
 the task enters `admission` and releases its queue worker. Its saved wait identifies
