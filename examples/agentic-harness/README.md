@@ -511,3 +511,8 @@ with their original composition, or use a fresh data directory for this revision
 The default context uses Agentic's loss-driven checkpoint policy: exact archive
 previews do not themselves trigger generated summaries. Evicted or lossy history
 still requires preservation. Maintenance remains charged to the shared allowance.
+
+The task system prompt states the agent's role and trust boundary. Capability
+instructions belong to tool descriptions: yielding tools declare their required
+last-call position, which the host also enforces. The system does not encourage
+delegation or rely on advice to guarantee completion capacity.

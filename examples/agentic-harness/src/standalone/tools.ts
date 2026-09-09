@@ -34,10 +34,10 @@ function definition(name: string, description: string): ToolDefinition {
 }
 export const internalDefinitions: ToolDefinition[] = [
     definition('spawn_agent', 'Delegate a bounded task with its needed context and selected parent tools. The child also gets read_tool_result for its own history when the parent has it. Returns child ID.'),
-    definition('wait_agents', 'Wait for direct children. Completed answers include nextOffset/eof; call again with one child ID and offset to read the rest.'),
+    definition('wait_agents', 'Wait for direct children; unfinished results arrive automatically. Must be the last call in the response. Completed answers include nextOffset/eof; call again with one child ID and offset to read the rest.'),
     definition('message_agent', 'Send a bounded message to a direct child or your parent. Messages are applied at a safe turn boundary.'),
     definition('cancel_agent', 'Cancel a direct child and its descendants.'),
-    definition('schedule_self', 'Release the worker until a future time before expiresAt. Use save_progress first if notes need updating.'),
+    definition('schedule_self', 'Release the worker until a future time before expiresAt. Must be the last call in the response. Use save_progress first if notes need updating.'),
     definition('save_progress', 'Replace your durable working notes: decisions, constraints, evidence references and remaining work. Always retained in prepared context.'),
     definition('save_artifact', 'Save a named text artifact for this task tree. Use artifacts for longer findings and retrieve them when needed.'),
     definition('read_tool_result', 'Retrieve exact saved text from this task’s tool history. Returns up to 8000 UTF-16 code units; continue with nextOffset. Use callId or messageIndex from a context reference. Does not rerun the original tool.'),
