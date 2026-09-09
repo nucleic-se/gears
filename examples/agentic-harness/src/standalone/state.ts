@@ -3,7 +3,7 @@ import { sql, type Kysely } from 'kysely';
 import type { Message, UserMessage, ToolCall, TokenUsage } from '@nucleic-se/agentic/llm';
 import type { ExecutionJournal } from '@nucleic-se/agentic/execution';
 import type { OperationResolution } from '@nucleic-se/agentic/harness';
-export type Phase = 'ready' | 'model' | 'tools' | 'external' | 'waiting' | 'sleeping' | 'paused' | 'completed' | 'failed' | 'unknown' | 'cancelled';
+export type Phase = 'ready' | 'model' | 'tools' | 'external' | 'admission' | 'waiting' | 'sleeping' | 'paused' | 'completed' | 'failed' | 'unknown' | 'cancelled';
 export interface Task {
     id: string;
     parentId?: string;
@@ -28,6 +28,8 @@ export interface Task {
     generation: number;
     operationId?: string;
     reservation?: number;
+    /** Undispatched work waiting for observed model reservations to settle. */
+    admissionWait?: { requiredTokens: number; operationIds: string[]; inboxSize: number };
     wakeAt?: number;
     waitFor?: string[];
     answer?: string;

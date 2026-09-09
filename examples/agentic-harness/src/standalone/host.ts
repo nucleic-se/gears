@@ -8,6 +8,7 @@ import type { ILLMProvider, ToolCall, Message } from '@nucleic-se/agentic/llm';
 import type { IValidatedToolRuntime, ToolCallResult } from '@nucleic-se/agentic/tool-runtime';
 import { TreeStore, terminal, type Tree, type Task, type Limits, type HarnessDatabase } from './state.js';
 import { internalDefinitions, validateInternal, internalAction, childResults, cancelTask, type HarnessTool } from './tools.js';
+import { AdmissionDeferred, admissionWait, admissionChanged } from './admission.js';
 const STEP = 'standalone.agent.step', LEASE = 'standalone.agent.host', TTL = 15000;
 export interface GearsHarnessRoles extends HarnessExecutionRoles { runtime: Container }
 export interface HarnessOptions {
@@ -69,7 +70,7 @@ export class StandaloneHarness {
         if (options.context && !options.composition) throw new Error('Custom context requires an explicit composition identity');
         return createHarness().compose({
             extensions: [
-                { id: 'runtime.gears', version: '28', apiVersion: 1, configuration: JSON.stringify({ rootTools, projectInstructions: typeof options.projectInstructions === 'function' ? { dynamic: true, composition: options.composition } : options.projectInstructions ?? [], checkpointing: options.checkpointing ?? true, modelTimeoutMs, outputTokens: options.outputTokens ?? 1800, tools: (options.tools ?? []).map(tool => ({ definition: tool.definition, effect: tool.effect })) }), roles: { runtime: () => StandaloneHarness.openRuntime(options) } },
+                { id: 'runtime.gears', version: '29', apiVersion: 1, configuration: JSON.stringify({ rootTools, projectInstructions: typeof options.projectInstructions === 'function' ? { dynamic: true, composition: options.composition } : options.projectInstructions ?? [], checkpointing: options.checkpointing ?? true, modelTimeoutMs, outputTokens: options.outputTokens ?? 1800, tools: (options.tools ?? []).map(tool => ({ definition: tool.definition, effect: tool.effect })) }), roles: { runtime: () => StandaloneHarness.openRuntime(options) } },
                 { id: 'provider.gears', version: '1', apiVersion: 1, roles: { provider: () => options.provider } },
                 { id: 'context.gears', version: '24', apiVersion: 1, configuration: JSON.stringify({ tokens: options.contextTokens ?? 16000, custom: options.context ? options.composition : undefined }), roles: { context: () => options.context ?? { ...budgetedContext('', options.contextTokens ?? 16000, {
                     includeToolCallIds: (options.tools ?? []).some(tool => tool.definition.name === 'memory_save'),
@@ -130,15 +131,17 @@ export class StandaloneHarness {
                 await host.assertLease();
                 host.validateComposition(tree);
                 await host.store.claim(tree);
-                if (Object.values(tree.tasks).some(t => t.phase === 'model' || t.phase === 'external')) {
+                if (Object.values(tree.tasks).some(t => t.phase === 'model' || t.phase === 'external' || (t.phase === 'cancelled' && t.operationId && t.reservation !== undefined))) {
                     await host.store.change(tree.id, 'recovery.interrupted', current => {
-                        for (const task of Object.values(current.tasks))
+                        for (const task of Object.values(current.tasks)) {
+                            if (task.phase === 'cancelled' && task.reservation !== undefined) task.operationId = undefined;
                             if (task.phase === 'model' || task.phase === 'external') {
                                 task.phase = 'unknown';
                                 task.error = 'Process stopped during an external operation; inspect receipts before resolving or starting new work';
                                 task.operationId = undefined;
                                 task.generation++;
                             }
+                        }
                     });
                 }
             }
@@ -289,13 +292,18 @@ export class StandaloneHarness {
     async reconcile() {
         await this.assertLease();
         for (let tree of await this.store.list(true)) {
-            const needs = Object.values(tree.tasks).some(t => !terminal(t.phase) && (Date.now() >= tree.limits.expiresAt || ((t.phase === 'waiting' || t.phase === 'sleeping') && Boolean(t.inbox?.length)) || (t.phase === 'sleeping' && Date.now() >= t.wakeAt!) ||
+            const needs = Object.values(tree.tasks).some(t => !terminal(t.phase) && (Date.now() >= tree.limits.expiresAt || admissionChanged(tree, t) || ((t.phase === 'waiting' || t.phase === 'sleeping') && Boolean(t.inbox?.length)) || (t.phase === 'sleeping' && Date.now() >= t.wakeAt!) ||
                 (t.phase === 'waiting' && t.waitFor?.every(id => terminal(tree.tasks[id].phase)))));
             if (needs)
                 tree = await this.store.change(tree.id, 'task.resumed', current => {
                     for (const task of Object.values(current.tasks)) {
                         if (terminal(task.phase))
                             continue;
+                        if (admissionChanged(current, task)) {
+                            task.phase = 'ready';
+                            delete task.admissionWait;
+                            task.generation++;
+                        }
                         if ((task.phase === 'waiting' || task.phase === 'sleeping') && task.inbox?.length) {
                             task.phase = 'ready';
                             task.wakeAt = undefined;
@@ -355,7 +363,7 @@ export class StandaloneHarness {
                 await this.reconcile();
                 return;
             }
-            if (terminal(task.phase) || task.phase === 'waiting' || task.phase === 'model' || task.phase === 'external')
+            if (terminal(task.phase) || task.phase === 'admission' || task.phase === 'waiting' || task.phase === 'model' || task.phase === 'external')
                 return;
             const lifetime = executionSignal({ signal, deadline: tree.limits.expiresAt });
             signal = lifetime.signal;
@@ -371,6 +379,22 @@ export class StandaloneHarness {
         catch (error) {
             if (this.ownershipLost)
                 return;
+            if (error instanceof AdmissionDeferred) {
+                const deferred = error;
+                const data: Record<string, unknown> = { requiredTokens: deferred.requiredTokens };
+                try {
+                    await this.store.change(treeId, 'model.deferred', tree => {
+                        const task = tree.tasks[taskId];
+                        if (task.phase !== 'ready' || task.generation !== deferred.generation) return;
+                        const operations = (task.inbox?.length ?? 0) === deferred.inboxSize ? admissionWait(tree, deferred.requiredTokens) : undefined;
+                        task.admissionWait = operations ? { requiredTokens: deferred.requiredTokens, operationIds: operations, inboxSize: task.inbox?.length ?? 0 } : undefined;
+                        task.phase = operations ? 'admission' : 'ready';
+                        task.generation++;
+                        Object.assign(data, { availableTokens: tree.limits.tokens - tree.chargedTokens, operationIds: operations ?? [] });
+                    }, taskId, data);
+                    return;
+                } catch (settlementError) { error = settlementError; }
+            }
             const current = await this.store.get(treeId), task = current?.tasks[taskId];
             if (task && !terminal(task.phase))
                 await this.store.change(treeId, 'task.failed', tree => {
@@ -439,8 +463,7 @@ export class StandaloneHarness {
                     if (Date.now() >= current.limits.expiresAt) throw new Error('Task lifetime expired');
                     if (current.modelCalls >= current.limits.modelCalls) throw new Error('Shared model-call budget exhausted');
                     if (now.calls >= now.maxCalls) throw new Error('Task model-call budget exhausted');
-                    if (current.chargedTokens + reservation > current.limits.tokens)
-                        throw new Error(`Shared token budget exhausted: request needs ${reservation}, remaining ${Math.max(0, current.limits.tokens - current.chargedTokens)}`);
+                    if (admissionWait(current, reservation)) throw new AdmissionDeferred(reservation, task.generation, task.inbox?.length ?? 0);
                     now.messages = messages;
                     now.inbox = (now.inbox ?? []).slice(task.inbox?.length ?? 0);
                     now.phase = 'model';

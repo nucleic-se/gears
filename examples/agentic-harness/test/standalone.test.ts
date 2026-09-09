@@ -481,14 +481,17 @@ it('reserves shared token budget before concurrent child dispatch', async () => 
         t.tasks[id] = newTask(id, id, [], { parentId: t.id, depth: 1 }); });
     try {
         await h.reconcile();
-        await state(h, tree.id, t => expect(['left', 'right'].filter(id => t.tasks[id].phase === 'failed')).toHaveLength(1));
-        const blocked = Object.values((await h.store.get(tree.id))!.tasks).find(task => task.phase === 'failed');
-        expect(blocked?.error).toMatch(/Shared token budget exhausted: request needs \d+, remaining \d+/);
+        await state(h, tree.id, t => expect(['left', 'right'].filter(id => t.tasks[id].phase === 'admission')).toHaveLength(1));
+        const blocked = Object.values((await h.store.get(tree.id))!.tasks).find(task => task.phase === 'admission');
+        expect(blocked?.admissionWait?.operationIds).toHaveLength(1);
         expect(turn).toHaveBeenCalledOnce();
     }
     finally {
         release();
     }
+    await state(h, tree.id, t => expect(['left', 'right'].every(id => t.tasks[id].phase === 'completed')).toBe(true));
+    expect(turn).toHaveBeenCalledTimes(2);
+    expect((await h.store.get(tree.id))!.chargedTokens).toBe(240);
 });
 it('does not scan completed trees during background reconciliation and can reopen a completed conversation', async () => {
     const provider = model(async () => reply('done')), first = await open(provider), tree = await first.create('first');

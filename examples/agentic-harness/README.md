@@ -153,7 +153,15 @@ children, then reconcile reported usage. The bundled subscription OAuth transpor
 removes the requested output cap, so its output reservation is a planning allowance.
 Token estimation is not a billing cap:
 a provider can report higher usage, which blocks subsequent admission. Unknown
-requests keep their reservation; definitively undispatched requests release it. Invalid
+requests keep their reservation; definitively undispatched requests release it.
+When live model reservations could release enough capacity for a pending request,
+the task enters `admission` and releases its queue worker. Its saved wait identifies
+the outstanding operations. A settlement or new input makes it ready to prepare a
+fresh request and retry atomic admission. Waiting consumes no model calls or tokens.
+If even releasing all live reservations cannot cover the request, admission fails.
+Unknown interrupted liabilities remain charged and cannot hold a wait indefinitely.
+`model.deferred` events expose the required estimate and observed reservations.
+Invalid
 output allowances are rejected before storage opens. Context preparation plus a provider call defaults to a five-minute absolute deadline.
 Set `modelTimeoutMs` in `HarnessOptions`, or CLI `--model-timeout-ms 300000`.
 The model queue step gets an additional 30 seconds for receipt/cleanup. A tool batch
