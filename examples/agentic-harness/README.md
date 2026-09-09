@@ -52,7 +52,7 @@ Do not set `GEARS_APP_DB_PATH`: this harness uses its own data directory.
 - Optional web UI: start tasks, inspect parent/child status and results, send
   messages, cancel work and read artifacts.
 - Read-only workspace tools by default. They read real files within the configured
-  workspace; this first version does not run shell commands or edit source files.
+  workspace. The optional coding mode also permits edits and shell commands.
 
 Example task:
 
@@ -88,8 +88,7 @@ registering an effectful tool grants it to the default root agent. Children can
 receive only a subset of their parent's manifest. A production write-tool pack
 needs its chosen authorization/approval policy before registration.
 
-`context` uses Agentic's `ContextStrategy` contract, replacing the old
-`composeContext` callback. A custom context needs an explicit non-secret
+`context` uses Agentic's `ContextStrategy` contract. A custom context needs an explicit non-secret
 `composition` identity and a consistent usage report for durable token admission.
 The built-in strategy resolves its ceiling from the provider's advertised model
 capacity through Agentic's `resolveContextBudget`. `contextTokens` can impose a
@@ -159,8 +158,7 @@ cannot be resolved through this tool API. There is no resolution form in the UI 
 
 Worker recovery uses the host's 15-second lease window with one-second heartbeats.
 This releases a dead queue attempt's concurrency slot after restart; it does not
-impose a 15-second limit on healthy calls. Retry limits remain zero. Runtime
-version 17 requires previous active tasks to use their original composition.
+impose a 15-second limit on healthy calls. Retry limits remain zero.
 
 ### Execution limits
 
@@ -268,7 +266,8 @@ tool content and inherit the UI's authentication boundary.
 
 ### Stable instructions and current state
 
-The Gears composition keeps its system instructions stable. Each request ends
+The Gears composition keeps its core system instruction stable; project instructions
+can refresh as described below. Each request ends
 with one protected, host-generated state message containing current call/token
 availability, progress notes and artifact names. That message is counted by the
 shared Agentic context pipeline and retained in the exact request intent, but is
@@ -280,12 +279,9 @@ hits or token-cost savings are not guaranteed. Resource figures are a snapshot
 before request admission, and concurrent children can consume budget afterward.
 Admission still checks the authoritative shared state atomically.
 
-The Gears runtime extension is version 17. The
-configured model timeout is included in the composition fingerprint. Active
-trees from earlier compositions require their original revision; new dogfood
-runs use fresh data directories. Existing data is not migrated or deleted.
-Continuing a completed tree also requires its original composition. An incompatible
-follow-up is rejected before ownership or task state changes.
+The configured model timeout participates in composition identity. Continuing a
+completed tree requires its original composition; an incompatible follow-up is
+rejected before ownership or task state changes.
 
 After dispatch, Agentic tool receipts classified as `unknown`, `timeout` or
 `cancelled` stop the task as `unknown` in the same transaction as the receipt.
@@ -299,9 +295,9 @@ The built-in context policy can replace older large text results with short
 previews and `read_tool_result` references. It uses Agentic's shared retention
 policy and only does this under budget pressure when the current task has that
 tool. Full evidence stays intact while it fits; Agentic references lower-priority
-groups first and stops once the request fits. Include
-`read_tool_result` in a delegated child's tools to enable recovery there; grants
-are never added implicitly. The two recent exchanges plus the transient state group remain present. If
+groups first and stops once the request fits. Children inherit `read_tool_result`
+when their parent has it; other tools require explicit selection. The two recent
+exchanges plus the transient state group remain present. If
 protected tool text alone cannot fit, Agentic uses a recoverable head/tail preview.
 Context reports identify every shortened payload and its exact source reference.
 
@@ -312,11 +308,10 @@ files or rerun a tool, and continues to work after restart. Invalid indices and
 out-of-range offsets fail explicitly. Retrieved chunks are not recursively
 replaced with references. This retrieves text, not native media blocks.
 
-The context extension is version 10 for pressure-driven retention; older active compositions
-must finish on their matching revision. This does not add semantic summaries,
-search across dropped history or a new memory store. Whole groups can still be
-dropped under the context ceiling, so it is not a guarantee of arbitrary-history
-recall.
+Archive previews do not add semantic search or a new memory store. The optional
+checkpoint lifecycle described below preserves a working summary when selection
+would otherwise lose older evidence. Neither mechanism guarantees recall of every
+detail in an arbitrarily long history.
 
 ### Dogfood controller and admission failures
 
@@ -365,8 +360,7 @@ fingerprint, so existing active tasks require their matching configuration.
 Artifact reads return `totalCharacters`, `offset`, `content`, `nextOffset` and `eof`.
 Continue with `nextOffset` until `eof`; offsets count UTF-16 code units and each
 page contains at most 12,000 units. An offset exactly at the end returns an empty
-EOF page; an offset beyond the end is rejected. Runtime version 7 requires the
-original composition for older persisted tasks, as described above.
+EOF page; an offset beyond the end is rejected.
 
 
 Fresh tool results remain intact while the request fits. Older results may be
@@ -376,16 +370,12 @@ tool result, not bytes a source tool already discarded. The coding runtime addit
 to its 8 MiB capture limit and exposes `read_output`; both retrieval tools are
 excluded from recursive presentation. Grant `read_output` alongside `shell_run`
 in coding compositions and keep their output directory with the task data.
-The default CLI uses the read-only subset of the shared coding pack. Older persisted tasks require their
-original context composition. Child-completion messages are not yet budgeted as
-a batch by this option.
+The default CLI uses the read-only subset of the shared coding pack. Child-result
+previews use a separate shared allowance and support pagination, as described below.
 
 ### Stable model cache scope
 
 The host supplies Agentic's provider-neutral `cacheScope` from the composition and task identity before request preparation and journaling. It survives scheduled continuation and reopen, while children receive distinct scopes. Providers may ignore the hint; the subscription adapter maps it to its own cache-routing fields. This is not a conversation store, cache guarantee or isolation boundary. Current machine state still replaces the final state message on each call.
-
-The `runtime.gears` extension is now version `8`. Existing trees retain their composition fingerprint and require their original runtime composition to resume. Start a new tree for this composition; no stored history is rewritten.
-
 
 ## Coding mode
 
@@ -399,97 +389,56 @@ The default CLI remains read-only. The shared pack has eight tools: `fs_read`,
 The Gears adapter owns no file or shell behavior; validation, execution, output
 capture and effect classification come from Agentic.
 
-The old `read_file` and `list_files` tools have been removed. Read-only mode exposes
+Read-only mode exposes
 `fs_read`, `fs_list`, `search_grep`, `search_find`, and `read_output`; it does not
 register the three write-classified tools. Tool manifest changes require existing
 tasks to finish under their original composition.
 
-## Experimental working checkpoints
+## Working checkpoints
 
-The CLI discovers root and nested `AGENTS.md` through Agentic's shared instruction
-loader, skipping dependency/state directories and directory links. Embedded hosts
-can select narrower scopes and supply `projectInstructions` from that loader.
-The source snapshot is included in task context and composition identity; new
-instruction content requires a new composition. Runtime version 16 adopts this
-behavior. Discovery happens once at composition startup; instructions are scoped
-by directory and do not hot-reload during a task.
+The built-in context uses Agentic's replaceable checkpoint lifecycle. It prepares
+ordinary task context first. Eviction or shortening without an exact archive
+reference triggers maintenance; recoverable previews alone do not. There is no
+fixed percentage trigger in the default composition. Set `checkpointing: false`
+to use the context assembler without generated maintenance.
 
-Archive retrieval uses Agentic's `readArchivedToolResult` primitive and returns
-both `messageIndex` and `callId` on each text page. Runtime version 15 includes
-this response change in the persisted composition identity.
+Agentic owns source views, checkpoint selection, source fitting, response
+validation and pure state reduction. Gears persists the opaque derived state and
+owns leases, shared admission, scheduling and atomic intent/receipt commits.
+Checkpoint calls use the same provider and task/tree allowances as ordinary calls.
+Their intents record `purpose: context`, with checkpoint purpose and source range
+in `contextMetadata`. Prepared requests show the exact input sent to the model.
 
-The shared checkpoint view retains explicitly pinned user-role instructions and
-the latest human instruction verbatim, even after summarizing their source range.
-These messages retain their source indexes and consume context budget. Runtime
-version 14 requires prior active trees to finish with their original composition.
+`Task.messages` remains the complete source archive. The working view contains
+checkpoint text, its source cursor and the recent tail. Human requirements and
+explicitly pinned user-role messages retain their text, provenance and source
+indexes even when their source range has been summarized. Durable progress notes
+remain separate host-owned evidence; generated checkpoints do not replace them.
 
-The host summarizes an older history prefix at 80% of the context strategy's
-reported token ceiling, including output reservation. If a custom context strategy
-does not report its ceiling, budget-driven shortening or eviction still triggers
-maintenance. Agentic owns threshold evaluation, complete-group selection and source
-fitting; the protected recent tail stays in context. The checkpoint is ordinary text
-plus a source cursor, while `Task.messages`
-retains the complete source history. Each checkpoint call uses the normal model
-intent/receipt journal and consumes the same task and shared call/token budgets.
-Intent events identify `purpose: checkpoint` and the source range; subsequent
-prepared requests show the exact checkpoint the task model received.
+Summary input omits opaque provider continuation annotations; the archive and
+recent active messages preserve them for replay. Oversized source groups are
+processed in bounded chunks with a persisted cursor into the projected evidence
+JSON. The complete-history boundary advances only after a group is fully covered.
 
-Summary input includes the original visible evidence but excludes opaque provider
-continuation annotations. The archive and recent active messages retain those
-annotations for replay. Source chunk offsets address the projected evidence JSON;
-the context composition version prevents resuming older offsets under this format.
+A complete, nonempty text response becomes a candidate, admitted against the next
+task context before replacing the accepted checkpoint. A complete response rejected
+by checkpoint validation, or a candidate exceeding the next context budget, gets
+one repair attempt. Partial output, cancellation and transport or preparation
+failures follow the normal failure path. The previous accepted checkpoint and
+source history survive rejection or failure; an exhausted repair stops with a diagnostic.
+This policy remains under evaluation for retention quality and maintenance cost.
 
-Only a complete, nonempty, bounded text response commits the checkpoint. A partial
-or failed response preserves the prior checkpoint, notes and source history and
-stops the task with a diagnostic. Successful checkpoints reconcile and replace
-progress notes. Oversized source groups are processed in bounded chunks with a persisted partial
-cursor. Each intent records exact character coverage. The complete history boundary
-advances only when the group is fully processed; no source is silently truncated.
+Archive retrieval uses Agentic's `readArchivedToolResult`, returning `callId` and
+`messageIndex` with each text page. Call IDs are independent of active-context
+positions; message indexes address the full archive. Ambiguous call IDs fail.
+Children can retrieve only their own receipts. Retrieval never reruns the source
+tool, and prepared request inspection cannot mutate dispatch or accounting.
 
-`HarnessOptions.checkpointing` defaults to `true`; set it to `false` for an explicit
-composition without automatic maintenance. The setting participates in composition
-identity. Tool evidence can be retrieved by `callId`, independent of active-context
-positions; the older `messageIndex` form still addresses the full archive. Ambiguous
-call IDs are rejected. This policy remains under evaluation for retention quality
-and maintenance overhead.
-
-
-Recoverable tool results retain their full text until context pressure requires
-shortening. The original remains in the task archive and `read_tool_result` pages
-it without rerunning the tool. Maintenance
-fits complete prefixes locally and uses resumable chunks for oversized groups.
-These context and runtime changes bump composition identity; open existing task
-stores with their original composition rather than silently reinterpreting them.
-
-
-Prepared requests are owned by Agentic execution; inspection cannot change their
-accounting or dispatch content. Checkpoint source messages must survive custom
-context preparation unchanged. Rich tool results use the shared Agentic projection
-and retain content blocks in the working transcript as well as the receipt.
-
-Gears owns lease checks, shared-budget admission, queue scheduling and atomic
-state/receipt commits. Agentic owns source views, checkpoint fitting and cursors,
-lossless source preparation, model dispatch and tool-message conversion. The host
-supplies transient state to `checkpointView` instead of manually adjusting indexes.
-
-Tool plugins supply their declared effects to Agentic's shared batch executor.
-When every call is a read, an invalid call produces its own error without
-discarding valid authorized reads. Batches containing a write or undeclared
-effect keep whole-batch argument rejection; uncertain dispatched outcomes still
-stop for reconciliation. Gears commits each resulting intent and receipt through
-its existing transaction boundary. Runtime composition version 24 includes these
-semantics; existing active trees require their original composition.
-
-Children inherit `read_tool_result` when their parent has it, in addition to the
-explicitly selected tool subset. It reads only the child's own saved receipts;
-it cannot read the parent's history or rerun a source tool. This lets the shared
-context builder replace oversized read results with recoverable previews even
-when the model delegates only filesystem tools. Runtime composition version 25
-includes this delegation rule. Other tools still require explicit selection.
-
-Context composition version 20 uses Agentic's configured checkpoint output budget
-as its requested size instead of a separate fixed character target. It retains
-the same context ceiling, output reservation and candidate admission checks.
+Tool plugins declare effects to Agentic's batch executor. For all-read batches,
+an invalid call gets its own error while other authorized reads can proceed.
+Batches containing a write or undeclared effect retain whole-batch argument
+rejection. Uncertain dispatched outcomes stop for reconciliation. Gears commits
+each intent and receipt through its existing transaction boundary.
 
 ## Optional workspace recall
 
@@ -504,9 +453,9 @@ Notes live in `DATA/memory.sqlite`, scoped to the canonical workspace. Use a
 separate data directory per workspace. Search returns compact historical notes;
 reading a revision exposes its captured source, offset and timestamp. These are
 observations to verify, not instructions. No automatic recall or background note
-generation is enabled. Runtime composition version 18 passes host session identity
-through the shared tool boundary. Restart/source integration checks pass; measured
-live-task benefit remains under evaluation.
+generation is enabled. Host task identity passes through the shared tool boundary.
+Restart/source integration checks pass; measured live-task benefit remains under
+evaluation.
 
 Notes can also page the complete original receipt after restart: pass `sourceOffset`
 to `memory_read`, then follow `nextOffset` until `eof`. Gears resolves the stored
@@ -540,13 +489,6 @@ instructions, relevant nested scopes and a catalog of other instruction paths.
 Custom hosts may supply a fixed instruction snapshot or an async renderer receiving
 messages and an abort signal. Dynamic renderers require an explicit composition ID.
 Prepared requests retain the exact rendered instructions for inspection.
-
-The runtime and context composition revisions changed. Open old active task trees
-with their original composition, or use a fresh data directory for this revision.
-
-The default context uses Agentic's loss-driven checkpoint policy: exact archive
-previews do not themselves trigger generated summaries. Evicted or lossy history
-still requires preservation. Maintenance remains charged to the shared allowance.
 
 The task system prompt states the agent's role and trust boundary. Capability
 instructions belong to tool descriptions: yielding tools declare their required
