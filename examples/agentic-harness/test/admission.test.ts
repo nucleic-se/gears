@@ -3,7 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { StandaloneHarness } from '../src/standalone/host.js';
-import { admissionWait } from '../src/standalone/admission.js';
+import { admissionWait, preparationCapacity } from '../src/standalone/admission.js';
 import type { Tree } from '../src/standalone/state.js';
 
 const resources: { host: StandaloneHarness; path: string }[] = [];
@@ -42,7 +42,9 @@ it('releases the worker without charging or dispatching, then admits exactly onc
     expect(f.turn).toHaveBeenCalledTimes(1);
     expect((await f.read()).chargedTokens).toBe(620);
     expect((await f.read()).tasks[f.tree.id].admissionWait).toBeUndefined();
-    expect((await f.host.store.events(f.tree.id)).filter(e=>e.type==='model.intent')).toHaveLength(1);
+    const intents = (await f.host.store.events(f.tree.id)).filter(e=>e.type==='model.intent');
+    expect(intents).toHaveLength(1);
+    expect(intents[0].data).toMatchObject({ context: { tokenBudget: 4500 } });
 });
 
 it.each([3900,undefined])('fails without dispatch when settlement leaves insufficient capacity (%s)',async used=>{
@@ -50,7 +52,7 @@ it.each([3900,undefined])('fails without dispatch when settlement leaves insuffi
     await f.settle(used); await f.host.reconcile(); await f.phase('failed');
     expect(f.turn).not.toHaveBeenCalled();
     expect((await f.read()).chargedTokens).toBe(used??4000);
-    expect((await f.read()).tasks[f.tree.id].error).toContain('Shared token budget exhausted');
+    expect((await f.read()).tasks[f.tree.id].error).toContain('protected content cannot be dropped');
 });
 
 it('does not strand a waiter if a receipt settles between rejection and persistence',async()=>{
@@ -141,4 +143,18 @@ it('does not await cancelled reservations indefinitely after restart',async()=>{
     const tree=(await resource.host.store.get(f.tree.id))!;
     expect(tree.tasks.pending.phase).toBe('cancelled');expect(tree.tasks.pending.operationId).toBeUndefined();
     expect(tree.chargedTokens).toBe(4000);expect(f.turn).not.toHaveBeenCalled();
+});
+
+
+it('counts only releasable live reservations when bounding preparation', async () => {
+    const f = await fixture();
+    expect(preparationCapacity(await f.read())).toBe(5000);
+    await f.host.store.change(f.tree.id, 'fixture.cancelled', tree => {
+        tree.tasks.pending.phase = 'cancelled';
+    });
+    expect(preparationCapacity(await f.read())).toBe(5000);
+    await f.settle(undefined);
+    expect(preparationCapacity(await f.read())).toBe(1000);
+    await f.host.store.change(f.tree.id, 'fixture.overspent', tree => { tree.chargedTokens = 6000; });
+    expect(preparationCapacity(await f.read())).toBe(0);
 });
