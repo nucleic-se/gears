@@ -598,7 +598,7 @@ it('counts inherited artifact names as new entries and preserves own entries aft
     } finally { await web.close(); }
 });
 
-it('paginates artifacts with exact UTF-16 offsets and rejects offsets beyond their end', async () => {
+it('paginates artifacts at complete code points with exact UTF-16 offsets', async () => {
     const { internalAction, validateInternal } = await import('../src/standalone/tools.js');
     const h = await open(model(async () => reply('done'))), tree = await h.create('artifact pagination');
     await state(h, tree.id, current => expect(current.tasks[current.id].phase).toBe('completed'));
@@ -610,10 +610,15 @@ it('paginates artifacts with exact UTF-16 offsets and rejects offsets beyond the
     const saved = (await h.store.get(tree.id))!, task = saved.tasks[tree.id];
     const first = JSON.parse(internalAction(saved, task, 'read_artifact', { name: 'paged', offset: 0 }, 'page-1'));
     const second = JSON.parse(internalAction(saved, task, 'read_artifact', { name: 'paged', offset: first.nextOffset }, 'page-2'));
-    expect(first).toMatchObject({ totalCharacters: content.length, offset: 0, nextOffset: 12000, eof: false });
-    expect(first.content.length).toBe(12000);
+    expect(first).toMatchObject({ totalCharacters: content.length, offset: 0, nextOffset: 11999, eof: false });
+    expect(first.content.length).toBe(11999);
+    for (const page of [first, second]) {
+        expect(page.content.length).toBeLessThanOrEqual(12000);
+        expect(Buffer.from(page.content, 'utf8').toString('utf8')).toBe(page.content);
+    }
     expect(first.content + second.content).toBe(content);
-    expect(second).toMatchObject({ offset: 12000, nextOffset: content.length, eof: true });
+    expect(second).toMatchObject({ offset: 11999, nextOffset: content.length, eof: true });
+    expect(() => internalAction(saved, task, 'read_artifact', { name: 'paged', offset: 12000 }, 'split-pair')).toThrow('inside a surrogate pair');
     const eof = JSON.parse(internalAction(saved, task, 'read_artifact', { name: 'paged', offset: content.length }, 'eof'));
     expect(eof).toEqual({ totalCharacters: content.length, offset: content.length, nextOffset: content.length, eof: true, content: '' });
     const empty = JSON.parse(internalAction(saved, task, 'read_artifact', { name: 'empty', offset: 0 }, 'empty'));
