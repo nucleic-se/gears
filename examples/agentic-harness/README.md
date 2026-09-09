@@ -53,6 +53,10 @@ Do not set `GEARS_APP_DB_PATH`: this harness uses its own data directory.
   messages, cancel work and read artifacts.
 - Read-only workspace tools by default. They read real files within the configured
   workspace. The optional coding mode also permits edits and shell commands.
+  The shared file reader returns PNG, JPEG, GIF and WebP captures as native image
+  attachments when no encoding is specified (5 MiB maximum, no automatic resizing).
+  Image results use the same context and provider contracts as other tool output;
+  viewing them requires an image-capable model.
 
 Example task:
 
