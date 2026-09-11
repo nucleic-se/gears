@@ -108,6 +108,19 @@ registering an effectful tool grants it to the default root agent. Children can
 receive only a subset of their parent's manifest. A production write-tool pack
 needs its chosen authorization/approval policy before registration.
 
+Optional shared packs can instead be supplied as `toolRuntime`, an Agentic
+`IValidatedToolRuntime` (including a `CompositeToolRuntime`). Every advertised tool
+must declare `effectFor(name)` as `read` or `write`; missing declarations are
+rejected. These tools merge with `tools`, with duplicate names rejected before
+storage opens. Supply an explicit non-secret `composition` identity and change it
+when addon behavior or configuration changes.
+
+Passing `toolRuntime` transfers ownership to the host, including when `open`
+fails. Its `close()` runs once, after admitted work drains and before storage
+closes. Do not share an owned runtime between hosts. The lower-level
+`runtimeTools(runtime, effect)` adapter remains available for caller-owned runtimes;
+that array adapter does not transfer ownership or close resources.
+
 `context` uses Agentic's `ContextStrategy` contract. A custom context needs an explicit non-secret
 `composition` identity and a consistent usage report for durable token admission.
 The built-in strategy resolves its ceiling from the provider's advertised model
