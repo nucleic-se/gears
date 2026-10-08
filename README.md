@@ -42,6 +42,40 @@ npx gears --output text work
 npx gears --output silent queue stats
 ```
 
+## Cron date calculation
+
+Use the calculation-only entry point without booting Gears or opening a database:
+
+```ts
+import { nextCronOccurrence, validateCronSchedule } from '@nucleic-se/gears/scheduling';
+
+const schedule = { cron: '0 9 * * MON-FRI', timeZone: 'Europe/Stockholm' };
+validateCronSchedule(schedule); // throws on invalid syntax, timezone or explicit date
+const next = nextCronOccurrence(schedule, new Date('2026-10-08T07:00:00Z'));
+// 2026-10-09T07:00:00.000Z — strictly after the supplied instant
+```
+
+Both functions are also exported from the main package. `CronSchedule` is the
+public readonly `{ cron: string; timeZone: string }` type. Five-field expressions
+and six-field expressions including seconds use node-cron's supported syntax;
+parser-only extensions such as `L` and `@daily` are rejected. Both day-of-month
+and weekday must match, consistent with Gears' existing scheduler.
+
+An explicit timezone and a valid `Date` reference are required. Calculation does
+not read the wall clock, mutate the reference, register jobs, perform catch-up,
+create an occurrence identity or execute work. No expiry or interval/task lifecycle
+is implied. Invalid inputs and dates with no calculable occurrence throw.
+
+Calendar iteration uses the pinned cron-parser DST policy: a nonexistent local
+02:30 in Stockholm's spring transition advances to 03:30 that day. Iterating
+from before the autumn overlap emits the first 02:30, then the following day;
+starting inside the second repeated hour can select that hour instead. Ordinary
+local times such as 09:00 keep their wall-clock time as the UTC offset changes.
+These are calculation semantics, not runtime delivery guarantees. Existing
+node-cron callbacks are unchanged and can behave differently at skipped/repeated
+clock times; callers needing identical execution must drive work from these
+calculated UTC instants. The API searches at most 400 calendar years.
+
 ## Bundles
 Bundles are the unit of extension in Gears. Each bundle can register services, CLI commands, and optional background behavior.
 

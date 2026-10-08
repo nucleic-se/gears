@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, readFileSync, rmSync, renameSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import assert from 'node:assert/strict';
@@ -23,6 +23,10 @@ import assert from 'node:assert/strict';
 import { boot, Container } from '@nucleic-se/gears';
 import { TestContainer } from '@nucleic-se/gears/testing';
 import { DatabaseServiceProvider } from '@nucleic-se/gears/database';
+import { nextCronOccurrence, validateCronSchedule } from '@nucleic-se/gears/scheduling';
+const schedule = { cron: '0 9 * * *', timeZone: 'Europe/Stockholm' };
+validateCronSchedule(schedule);
+assert.equal(nextCronOccurrence(schedule, new Date('2026-10-08T07:00:00Z')).toISOString(), '2026-10-09T07:00:00.000Z');
 const app = await boot({ dataDir: process.cwd() + '/data' });
 assert(app instanceof Container);
 const provider = new DatabaseServiceProvider(app);
@@ -39,6 +43,17 @@ await test.shutdown();
     // Run before installing consumer tooling: runtime cannot rely on dev dependencies.
     writeFileSync(path.join(temp, 'consumer.mjs'), consumer);
     execFileSync(process.execPath, ['consumer.mjs'], { cwd: temp, stdio: 'inherit', timeout: 15_000 });
+    // The calculation subpath must work even when native runtime storage is unavailable.
+    writeFileSync(path.join(temp, 'timing.mjs'), `
+import assert from 'node:assert/strict';
+import { nextCronOccurrence } from '@nucleic-se/gears/scheduling';
+assert.equal(nextCronOccurrence({cron: '0 9 * * *', timeZone: 'UTC'}, new Date('2026-10-08T09:00:00Z')).toISOString(), '2026-10-09T09:00:00.000Z');
+`);
+    const nativePackage = path.join(temp, 'node_modules', 'better-sqlite3');
+    const hiddenNativePackage = path.join(temp, 'native-storage-unavailable');
+    renameSync(nativePackage, hiddenNativePackage);
+    try { execFileSync(process.execPath, ['timing.mjs'], { cwd: temp, stdio: 'inherit', timeout: 15_000 }); }
+    finally { renameSync(hiddenNativePackage, nativePackage); }
     const cli = path.join(temp, 'node_modules', '.bin', 'gears');
     const version = execFileSync(cli, ['--version'], { cwd: temp, encoding: 'utf8', timeout: 10_000 });
     assert.equal(version.trim(), JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8')).version);
