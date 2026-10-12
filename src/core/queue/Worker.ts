@@ -22,6 +22,10 @@ export class Worker {
     private recoveryCheckIntervalMs: number;
     private recoveryTimeoutMs: number;
     private pollTimer: NodeJS.Timeout | null = null;
+    private pollTask: Promise<void> | null = null;
+    private pollRequested = false;
+    private pollNotBefore = 0;
+    private stopping: Promise<void> | null = null;
     private maxConcurrency: number;
     private pollIntervalMs: number;
     private heartbeatIntervalMs: number;
@@ -60,41 +64,62 @@ export class Worker {
     }
 
     start() {
+        if (this.stopping) throw new Error('Worker is still stopping');
         if (this.running) return;
         this.running = true;
+        this.pollNotBefore = 0;
         this.logger.info(`Worker started polling`, { concurrency: this.maxConcurrency });
 
         this.startRecoveryLoop();
         this.startMetricsLoop();
 
-        const loop = async () => {
-            if (!this.running) return;
+        this.requestPoll(0);
+    }
 
+    private requestPoll(delay: number): void {
+        if (!this.running) return;
+        if (this.pollTask) { this.pollRequested = true; return; }
+        if (this.pollTimer) clearTimeout(this.pollTimer);
+        this.pollTimer = setTimeout(() => {
+            this.pollTimer = null;
+            this.beginPoll();
+        }, Math.max(delay, this.pollNotBefore - Date.now()));
+    }
+
+    private beginPoll(): void {
+        if (!this.running || this.pollTask) return;
+        this.pollRequested = false;
+        let failed = false;
+        // Publish the task before entering an asynchronous queue implementation.
+        this.pollTask = Promise.resolve().then(async () => {
             try {
-                // Fill up to maxConcurrency slots
                 while (this.running && this.activeJobs < this.maxConcurrency) {
                     const job = await this.queue.pop();
                     if (!job) break;
-
+                    if (!this.running) {
+                        await this.queue.release(job.id, job.claimToken ?? undefined);
+                        break;
+                    }
                     this.activeJobs++;
                     const jobPromise = this.process(job).finally(() => {
                         this.activeJobs--;
                         this.activePromises.delete(jobPromise);
-                        if (this.running) setImmediate(loop);
+                        this.requestPoll(0);
                     });
                     this.activePromises.add(jobPromise);
                 }
-
-                if (this.activeJobs < this.maxConcurrency) {
-                    this.pollTimer = setTimeout(loop, this.pollIntervalMs);
-                }
             } catch (err) {
+                failed = true;
+                this.pollNotBefore = Date.now() + 5000;
                 this.logger.error('Worker poll error', err as Error);
-                this.pollTimer = setTimeout(loop, 5000);
             }
-        };
-
-        loop();
+        }).finally(() => {
+            this.pollTask = null;
+            if (!this.running) return;
+            if (failed) this.requestPoll(5000);
+            else if (this.pollRequested) this.requestPoll(0);
+            else if (this.activeJobs < this.maxConcurrency) this.requestPoll(this.pollIntervalMs);
+        });
     }
 
     private startRecoveryLoop() {
@@ -142,9 +167,18 @@ export class Worker {
         this.metricsInterval = setInterval(updateMetrics, 5000);
     }
 
-    async stop(): Promise<void> {
+    stop(): Promise<void> {
+        if (this.stopping) return this.stopping;
+        this.stopping = this.stopWorker().finally(() => { this.stopping = null; });
+        return this.stopping;
+    }
+
+    private async stopWorker(): Promise<void> {
         this.running = false;
         if (this.pollTimer) clearTimeout(this.pollTimer);
+        this.pollTimer = null;
+        this.pollRequested = false;
+        this.pollNotBefore = 0;
         if (this.recoveryInterval) clearInterval(this.recoveryInterval);
         if (this.metricsInterval) clearInterval(this.metricsInterval);
         this.logger.info(`Worker stopping`, { activeJobs: this.activePromises.size });
@@ -163,6 +197,8 @@ export class Worker {
         // Dependencies must remain alive until every invoked handler has actually
         // settled. A non-cooperative in-process handler therefore prevents clean
         // shutdown and leaves the supervisor to terminate the process.
+        // A pop may have already claimed work. Release it before closing the queue.
+        await this.pollTask;
         await Promise.allSettled([...this.activePromises, ...this.activeHandlerPromises]);
         clearTimeout(timeoutTimer);
 

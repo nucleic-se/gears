@@ -9,6 +9,12 @@ framework is alpha.
 
 ## Highlights
 - Worker with retries, heartbeats, and recovery
+
+The worker serializes queue claims and coalesces job-completion wakeups into one
+polling loop. Once the queue is empty, polling returns to the configured
+`pollInterval`; completed jobs do not create additional idle timers. Shutdown
+waits for an outstanding claim and releases any job received after stopping.
+Call `start()` again only after `stop()` settles.
 - SQLite-backed queue and distributed cron locking
 - Bundle lifecycle with CLI-safe commands
 - DI container and event bus
